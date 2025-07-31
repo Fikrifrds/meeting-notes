@@ -1,11 +1,13 @@
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 use std::thread;
 use std::sync::mpsc;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub struct AudioState {
     is_recording: Arc<Mutex<bool>>,
@@ -265,9 +267,9 @@ fn mix_audio_streams(mic_data: &[f32], system_data: &[f32], mic_gain: f32, syste
 }
 
 fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
-    use whisper_rs::{WhisperState, FullParams, SamplingStrategy};
+    use whisper_rs::{FullParams, SamplingStrategy};
     
-    let duration = audio_data.len() as f32 / 16000.0;
+    let _duration = audio_data.len() as f32 / 16000.0;
     
     // Check if audio is too short
     if audio_data.len() < 1600 { // Less than 0.1 seconds at 16kHz
@@ -891,6 +893,180 @@ async fn save_transcript_to_file(transcript: String, filename: Option<String>) -
     Ok(format!("Transcript saved to: {}", file_path.display()))
 }
 
+// OpenAI API structures
+#[derive(Serialize, Deserialize)]
+struct OpenAIMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OpenAIChoice {
+    message: OpenAIMessage,
+    finish_reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TokenDetails {
+    cached_tokens: Option<u32>,
+    audio_tokens: Option<u32>,
+    reasoning_tokens: Option<u32>,
+    accepted_prediction_tokens: Option<u32>,
+    rejected_prediction_tokens: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Usage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    prompt_tokens_details: Option<TokenDetails>,
+    completion_tokens_details: Option<TokenDetails>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OpenAIResponse {
+    choices: Vec<OpenAIChoice>,
+    usage: Option<Usage>,
+}
+
+#[tauri::command]
+async fn generate_meeting_minutes(transcript: String) -> Result<String, String> {
+    // Load environment variables
+    dotenv::dotenv().ok();
+    
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY not found in environment variables. Please add it to your .env file.".to_string())?;
+    
+    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let max_tokens = std::env::var("OPENAI_MAX_TOKENS")
+        .unwrap_or_else(|_| "2000".to_string())
+        .parse::<u32>()
+        .unwrap_or(2000);
+    let temperature = std::env::var("OPENAI_TEMPERATURE")
+        .unwrap_or_else(|_| "0.3".to_string())
+        .parse::<f32>()
+        .unwrap_or(0.3);
+
+    if transcript.trim().is_empty() {
+        return Err("No transcript provided for meeting minutes generation".to_string());
+    }
+
+    // Create the prompt for meeting minutes
+    let system_prompt = r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. Include:
+
+1. **Meeting Summary** - Brief overview of the meeting
+2. **Key Discussion Points** - Main topics discussed
+3. **Decisions Made** - Any decisions or conclusions reached
+4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
+5. **Next Steps** - Follow-up actions or future meetings
+
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc."#;
+
+    let user_prompt = format!("Please generate meeting minutes from this transcript:\n\n{}", transcript);
+
+    // Prepare the OpenAI request
+    let request = OpenAIRequest {
+        model,
+        messages: vec![
+            OpenAIMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            OpenAIMessage {
+                role: "user".to_string(),
+                content: user_prompt,
+            },
+        ],
+        max_tokens: Some(max_tokens),
+        temperature: Some(temperature),
+    };
+
+    // Make the API call
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request to OpenAI: {}", e))?;
+
+    if !response.status().is_success() {
+        let status_code = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("OpenAI API error ({}): {}", status_code, error_text));
+    }
+
+    // Get response text first for debugging
+    let response_text = response.text().await
+        .map_err(|e| format!("Failed to get response text: {}", e))?;
+    
+    // Try to parse the JSON response
+    let openai_response: OpenAIResponse = serde_json::from_str(&response_text)
+        .map_err(|e| format!("Failed to parse OpenAI response: {}. Response was: {}", e, response_text))?;
+
+    if openai_response.choices.is_empty() {
+        return Err("No response from OpenAI".to_string());
+    }
+
+    let meeting_minutes = &openai_response.choices[0].message.content;
+    
+    // Add simple metadata header
+    let now = chrono::Utc::now();
+    let formatted_minutes = format!(
+        "# Meeting Minutes\n\n**Generated:** {}\n**Source:** Audio Transcript\n\n---\n\n{}",
+        now.format("%Y-%m-%d %H:%M:%S UTC"),
+        meeting_minutes
+    );
+
+    Ok(formatted_minutes)
+}
+
+#[tauri::command]
+async fn save_meeting_minutes(meeting_minutes: String, filename: Option<String>) -> Result<String, String> {
+    use std::fs;
+    use std::io::Write;
+    
+    if meeting_minutes.trim().is_empty() {
+        return Err("No meeting minutes content to save".to_string());
+    }
+    
+    // Create the output directory
+    let home_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?;
+    let output_dir = home_dir.join("Documents").join("MeetingRecordings");
+    
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    
+    // Generate filename if not provided
+    let file_name = filename.unwrap_or_else(|| {
+        let now = chrono::Utc::now();
+        format!("meeting_minutes_{}.md", now.format("%Y-%m-%d_%H-%M-%S"))
+    });
+    
+    let file_path = output_dir.join(&file_name);
+    
+    // Write meeting minutes to file
+    let mut file = fs::File::create(&file_path)
+        .map_err(|e| format!("Failed to create meeting minutes file: {}", e))?;
+    
+    file.write_all(meeting_minutes.as_bytes())
+        .map_err(|e| format!("Failed to write meeting minutes to file: {}", e))?;
+    
+    Ok(format!("Meeting minutes saved to: {}", file_path.display()))
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -912,6 +1088,8 @@ pub fn run() {
             enable_realtime_transcription,
             disable_realtime_transcription,
             get_recording_status,
+            generate_meeting_minutes,
+            save_meeting_minutes,
             greet
         ])
         .run(tauri::generate_context!())

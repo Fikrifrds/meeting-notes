@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import ReactMarkdown from 'react-markdown';
 import "./App.css";
 
 function App() {
@@ -15,6 +16,8 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [audioDevices, setAudioDevices] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [meetingMinutes, setMeetingMinutes] = useState("");
+  const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
 
   useEffect(() => {
     let interval: number;
@@ -206,6 +209,7 @@ function App() {
     setRecordingTime(0);
     setTranscript("");
     setRealtimeTranscript("");
+    setMeetingMinutes("");
     setLastRecordingPath("");
     setRecordingStatus("Not recording");
     clearError();
@@ -238,6 +242,62 @@ function App() {
 
   const toggleSettings = () => {
     setShowSettings(!showSettings);
+  };
+
+  const generateMeetingMinutes = async () => {
+    if (!transcript.trim()) {
+      showError("No transcript available to generate meeting minutes. Please transcribe audio first.");
+      return;
+    }
+
+    try {
+      clearError();
+      setIsGeneratingMinutes(true);
+      setMeetingMinutes("Generating meeting minutes with AI...");
+      
+      const result = await invoke<string>("generate_meeting_minutes", { transcript });
+      console.log("Meeting minutes generated:", result);
+      
+      setMeetingMinutes(result);
+      
+    } catch (error) {
+      console.error("Failed to generate meeting minutes:", error);
+      setMeetingMinutes("");
+      showError(`Failed to generate meeting minutes: ${error}`);
+    } finally {
+      setIsGeneratingMinutes(false);
+    }
+  };
+
+  const saveMeetingMinutes = async () => {
+    if (!meetingMinutes.trim()) {
+      showError("No meeting minutes to save. Please generate meeting minutes first.");
+      return;
+    }
+
+    try {
+      clearError();
+      const result = await invoke<string>("save_meeting_minutes", { 
+        meetingMinutes: meetingMinutes,
+        filename: null 
+      });
+      console.log("Meeting minutes saved:", result);
+      showError(`Meeting minutes saved successfully!\n${result}`);
+      
+    } catch (error) {
+      console.error("Error saving meeting minutes:", error);
+      showError(`Error saving meeting minutes: ${error}`);
+    }
+  };
+
+  const handleClearAll = () => {
+    setRecordingTime(0);
+    setTranscript("");
+    setRealtimeTranscript("");
+    setMeetingMinutes("");
+    setLastRecordingPath("");
+    setRecordingStatus("Not recording");
+    clearError();
   };
 
   return (
@@ -329,9 +389,41 @@ function App() {
           </div>
         </div>
 
+        <div className="meeting-minutes-section">
+          <div className="section-header">
+            <h3>🤖 AI Meeting Minutes</h3>
+            {transcript && !isRecording && (
+              <button 
+                className="btn btn-ai" 
+                onClick={generateMeetingMinutes}
+                disabled={isGeneratingMinutes}
+              >
+                {isGeneratingMinutes ? 'Generating...' : '✨ Generate Minutes'}
+              </button>
+            )}
+          </div>
+          <div className="meeting-minutes-area">
+            {meetingMinutes ? (
+              <ReactMarkdown>{meetingMinutes}</ReactMarkdown>
+            ) : (
+              "AI-generated meeting minutes will appear here after generating..."
+            )}
+          </div>
+          {meetingMinutes && (
+            <div className="minutes-actions">
+              <button 
+                className="action-btn primary" 
+                onClick={saveMeetingMinutes}
+              >
+                💾 Save Minutes
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="actions">
-          <button className="action-btn" onClick={handleClear}>
-            Clear
+          <button className="action-btn" onClick={handleClearAll}>
+            Clear All
           </button>
           <button className="action-btn" onClick={toggleSettings}>
             Settings
