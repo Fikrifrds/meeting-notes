@@ -4,63 +4,140 @@ import "./App.css";
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
-  const [timer, setTimer] = useState(0);
+  const [recordingTime, setRecordingTime] = useState(0);
   const [transcript, setTranscript] = useState("");
-  const [status, setStatus] = useState("Ready to record");
+  const [whisperInitialized, setWhisperInitialized] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [lastRecordingPath, setLastRecordingPath] = useState("");
+  const [isRealtimeEnabled, setIsRealtimeEnabled] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState("Not recording");
+  const [realtimeTranscript, setRealtimeTranscript] = useState("");
 
-  // Timer effect
   useEffect(() => {
     let interval: number;
     if (isRecording) {
       interval = setInterval(() => {
-        setTimer(prev => prev + 1);
+        setRecordingTime((prev) => prev + 1);
+        // Update recording status
+        updateRecordingStatus();
       }, 1000);
     }
     return () => clearInterval(interval);
   }, [isRecording]);
 
-  // Format timer display
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const updateRecordingStatus = async () => {
+    try {
+      const status = await invoke<string>("get_recording_status");
+      setRecordingStatus(status);
+    } catch (error) {
+      console.error("Failed to get recording status:", error);
+    }
   };
 
-  const handleRecordToggle = async () => {
-    if (isRecording) {
-      // Stop recording
-      setIsRecording(false);
-      setStatus("Recording saved successfully");
-      // TODO: Call Rust backend to stop recording
-      try {
-        await invoke("stop_recording");
-      } catch (error) {
-        console.error("Error stopping recording:", error);
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const initializeWhisper = async () => {
+    try {
+      const result = await invoke("initialize_whisper");
+      console.log("Whisper initialization:", result);
+      setWhisperInitialized(true);
+    } catch (error) {
+      console.error("Failed to initialize Whisper:", error);
+      alert(`Failed to initialize Whisper: ${error}`);
+    }
+  };
+
+  const toggleRealtimeTranscription = async () => {
+    try {
+      if (isRealtimeEnabled) {
+        await invoke("disable_realtime_transcription");
+        setIsRealtimeEnabled(false);
+      } else {
+        await invoke("enable_realtime_transcription");
+        setIsRealtimeEnabled(true);
       }
-    } else {
-      // Start recording
+    } catch (error) {
+      console.error("Failed to toggle real-time transcription:", error);
+      alert(`Failed to toggle real-time transcription: ${error}`);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
       setIsRecording(true);
-      setTimer(0);
-      setStatus("Recording... 🔴");
+      setRecordingTime(0);
       setTranscript("");
-      // TODO: Call Rust backend to start recording
-      try {
-        await invoke("start_recording");
-      } catch (error) {
-        console.error("Error starting recording:", error);
+      setRealtimeTranscript("");
+      
+      const result = await invoke("start_recording");
+      console.log("Recording started:", result);
+      
+    } catch (error) {
+      console.error("Failed to start recording:", error);
+      setIsRecording(false);
+      alert(`Failed to start recording: ${error}`);
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      const result = await invoke<string>("stop_recording");
+      console.log("Recording stopped:", result);
+      
+      setIsRecording(false);
+      
+      // Extract file path from result message
+      const pathMatch = result.match(/Recording stopped and saved: (.+)/);
+      if (pathMatch) {
+        setLastRecordingPath(pathMatch[1]);
+        alert(`Recording saved successfully!\n${result}`);
+      } else {
+        alert(`Recording stopped: ${result}`);
       }
+      
+    } catch (error) {
+      console.error("Failed to stop recording:", error);
+      setIsRecording(false);
+      alert(`Failed to stop recording: ${error}`);
+    }
+  };
+
+  const transcribeAudio = async () => {
+    if (!lastRecordingPath) {
+      alert("No recording available to transcribe. Please record audio first.");
+      return;
+    }
+
+    try {
+      setIsTranscribing(true);
+      setTranscript("Processing audio file...");
+      
+      const result = await invoke<string>("transcribe_audio", { audioPath: lastRecordingPath });
+      console.log("Transcription result:", result);
+      
+      setTranscript(result);
+      
+    } catch (error) {
+      console.error("Failed to transcribe:", error);
+      setTranscript(`Transcription failed: ${error}`);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
   const handleClear = () => {
-    setTimer(0);
+    setRecordingTime(0);
     setTranscript("");
-    setStatus("Ready to record");
+    setRealtimeTranscript("");
+    setLastRecordingPath("");
+    setRecordingStatus("Not recording");
   };
 
   const handleSave = async () => {
-    // TODO: Call Rust backend to save files
     try {
       await invoke("save_files");
       alert('Files saved to Documents/MeetingRecorder/\n\n- meeting_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.wav (audio)\n- meeting_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt (transcript)');
@@ -70,70 +147,118 @@ function App() {
   };
 
   return (
-    <div className="app-container">
-      <div className="header">
-        <h1>🎙️ Meeting Recorder</h1>
-        <p>Simple voice recording with real-time transcription</p>
-      </div>
+    <div className="container">
+      <header className="header">
+        <h1>Meeting Recorder</h1>
+        <div className="status">
+          <span className={`status-indicator ${isRecording ? 'recording' : 'idle'}`}></span>
+          <span>{isRecording ? 'Recording' : 'Ready'}</span>
+          {isRecording && (
+            <span className="recording-details">
+              • {recordingStatus}
+              {isRealtimeEnabled && " • Real-time ON"}
+            </span>
+          )}
+        </div>
+      </header>
 
-      <div className="recording-section">
-        <button 
-          className={`record-button ${isRecording ? 'recording' : ''}`}
-          onClick={handleRecordToggle}
-        >
-          {isRecording ? '🛑 Stop Recording' : '🎙️ Start Recording'}
-        </button>
-
-        <div className="status-info">
-          <div className={`status ${isRecording ? 'recording' : ''}`}>
-            {status}
+      <main className="main">
+        <div className="recording-section">
+          <div className="timer">
+            <h2>{formatTime(recordingTime)}</h2>
           </div>
-          <div className={`timer ${isRecording ? 'recording' : ''}`}>
-            {formatTime(timer)}
+
+          <div className="audio-visualization">
+            <div className="waveform">
+              {Array.from({ length: 20 }, (_, i) => (
+                <div
+                  key={i}
+                  className={`bar ${isRecording ? 'active' : ''}`}
+                  style={{
+                    animationDelay: `${i * 0.1}s`,
+                    height: isRecording ? `${Math.random() * 40 + 10}px` : '4px'
+                  }}
+                ></div>
+              ))}
+            </div>
+          </div>
+
+          <div className="controls">
+            {!whisperInitialized && (
+              <button 
+                className="btn btn-secondary"
+                onClick={initializeWhisper}
+              >
+                Initialize Whisper
+              </button>
+            )}
+            
+            {whisperInitialized && !isRecording && (
+              <button
+                className={`btn ${isRealtimeEnabled ? 'btn-success' : 'btn-secondary'}`}
+                onClick={toggleRealtimeTranscription}
+              >
+                {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
+              </button>
+            )}
+            
+            <button
+              className={`btn ${isRecording ? 'btn-danger' : 'btn-primary'}`}
+              onClick={isRecording ? stopRecording : startRecording}
+            >
+              {isRecording ? 'Stop Recording' : 'Start Recording'}
+            </button>
+
+            {lastRecordingPath && whisperInitialized && !isRecording && (
+              <button
+                className="btn btn-secondary"
+                onClick={transcribeAudio}
+                disabled={isTranscribing}
+              >
+                {isTranscribing ? 'Transcribing...' : 'Transcribe Audio'}
+              </button>
+            )}
           </div>
         </div>
 
-        {isRecording && (
-          <div className="audio-indicator">
-            {[...Array(8)].map((_, i) => (
-              <div 
-                key={i} 
-                className={`audio-bar ${Math.random() > 0.5 ? 'active' : ''}`}
-              />
-            ))}
+        <div className="transcript-section">
+          <h3>Transcript</h3>
+          {isRealtimeEnabled && isRecording && (
+            <div className="realtime-transcript">
+              <h4>Real-time (Live)</h4>
+              <div className="transcript-area realtime">
+                {realtimeTranscript || "Listening for speech..."}
+              </div>
+            </div>
+          )}
+          <div className="final-transcript">
+            {(isRealtimeEnabled && isRecording) && <h4>Final Transcript</h4>}
+            <div className="transcript-area">
+              {transcript || "Transcript will appear here after recording and transcription..."}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="transcript-section">
-        <div className="transcript-label">Live Transcript:</div>
-        <textarea 
-          className={`transcript-box ${transcript ? '' : 'empty'}`}
-          value={transcript}
-          placeholder="Text will appear here as you speak during the recording..."
-          readOnly
-        />
-      </div>
+        <div className="actions">
+          <button className="action-btn" onClick={handleClear}>
+            Clear
+          </button>
+          <button className="action-btn">
+            Settings
+          </button>
+          <button 
+            className="action-btn primary" 
+            onClick={handleSave}
+            disabled={!transcript}
+          >
+            Save Files
+          </button>
+        </div>
 
-      <div className="actions">
-        <button className="action-btn" onClick={handleClear}>
-          Clear
-        </button>
-        <button className="action-btn">
-          Settings
-        </button>
-        <button 
-          className="action-btn primary" 
-          onClick={handleSave}
-          disabled={!transcript}
-        >
-          Save Files
-        </button>
-      </div>
-
-      <div className="footer">
-        Files saved to: Documents/MeetingRecorder/meeting_{new Date().toISOString().slice(0, 10)}_*
-      </div>
+        <div className="footer">
+          Files saved to: Documents/MeetingRecorder/meeting_{new Date().toISOString().slice(0, 10)}_*
+        </div>
+      </main>
     </div>
   );
 }
