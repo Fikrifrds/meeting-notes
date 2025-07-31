@@ -12,6 +12,9 @@ function App() {
   const [isRealtimeEnabled, setIsRealtimeEnabled] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState("Not recording");
   const [realtimeTranscript, setRealtimeTranscript] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     let interval: number;
@@ -24,6 +27,39 @@ function App() {
     }
     return () => clearInterval(interval);
   }, [isRecording]);
+
+  // Load audio devices on component mount
+  useEffect(() => {
+    // Delay to ensure Tauri API is fully loaded
+    const timer = setTimeout(() => {
+      loadAudioDevices();
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  const clearError = () => setError(null);
+
+  const showError = (message: string) => {
+    setError(message);
+    setTimeout(clearError, 5000); // Auto-clear after 5 seconds
+  };
+
+  const loadAudioDevices = async () => {
+    try {
+      // Check if invoke is available (Tauri API loaded)
+      if (typeof invoke === 'undefined') {
+        console.log("Tauri API not yet loaded, skipping device loading");
+        return;
+      }
+      
+      const devices = await invoke<string[]>("get_audio_devices");
+      setAudioDevices(devices);
+    } catch (error) {
+      console.error("Failed to load audio devices:", error);
+      showError(`Failed to load audio devices: ${error}`);
+    }
+  };
 
   const updateRecordingStatus = async () => {
     try {
@@ -42,17 +78,19 @@ function App() {
 
   const initializeWhisper = async () => {
     try {
+      clearError();
       const result = await invoke("initialize_whisper");
       console.log("Whisper initialization:", result);
       setWhisperInitialized(true);
     } catch (error) {
       console.error("Failed to initialize Whisper:", error);
-      alert(`Failed to initialize Whisper: ${error}`);
+      showError(`Failed to initialize Whisper: ${error}`);
     }
   };
 
   const toggleRealtimeTranscription = async () => {
     try {
+      clearError();
       if (isRealtimeEnabled) {
         await invoke("disable_realtime_transcription");
         setIsRealtimeEnabled(false);
@@ -62,12 +100,13 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to toggle real-time transcription:", error);
-      alert(`Failed to toggle real-time transcription: ${error}`);
+      showError(`Failed to toggle real-time transcription: ${error}`);
     }
   };
 
   const startRecording = async () => {
     try {
+      clearError();
       setIsRecording(true);
       setRecordingTime(0);
       setTranscript("");
@@ -79,12 +118,13 @@ function App() {
     } catch (error) {
       console.error("Failed to start recording:", error);
       setIsRecording(false);
-      alert(`Failed to start recording: ${error}`);
+      showError(`Failed to start recording: ${error}`);
     }
   };
 
   const stopRecording = async () => {
     try {
+      clearError();
       const result = await invoke<string>("stop_recording");
       console.log("Recording stopped:", result);
       
@@ -94,25 +134,23 @@ function App() {
       const pathMatch = result.match(/Recording stopped and saved: (.+)/);
       if (pathMatch) {
         setLastRecordingPath(pathMatch[1]);
-        alert(`Recording saved successfully!\n${result}`);
-      } else {
-        alert(`Recording stopped: ${result}`);
       }
       
     } catch (error) {
       console.error("Failed to stop recording:", error);
       setIsRecording(false);
-      alert(`Failed to stop recording: ${error}`);
+      showError(`Failed to stop recording: ${error}`);
     }
   };
 
   const transcribeAudio = async () => {
     if (!lastRecordingPath) {
-      alert("No recording available to transcribe. Please record audio first.");
+      showError("No recording available to transcribe. Please record audio first.");
       return;
     }
 
     try {
+      clearError();
       setIsTranscribing(true);
       setTranscript("Processing audio file...");
       
@@ -122,8 +160,9 @@ function App() {
       setTranscript(result);
       
     } catch (error) {
-      console.error("Failed to transcribe:", error);
-      setTranscript(`Transcription failed: ${error}`);
+      console.error("Failed to transcribe audio:", error);
+      setTranscript("");
+      showError(`Failed to transcribe audio: ${error}`);
     } finally {
       setIsTranscribing(false);
     }
@@ -135,15 +174,36 @@ function App() {
     setRealtimeTranscript("");
     setLastRecordingPath("");
     setRecordingStatus("Not recording");
+    clearError();
   };
 
   const handleSave = async () => {
     try {
+      clearError();
+      
+      // Save audio file
       await invoke("save_files");
-      alert('Files saved to Documents/MeetingRecorder/\n\n- meeting_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.wav (audio)\n- meeting_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.txt (transcript)');
+      
+      // Save transcript if available
+      if (transcript.trim()) {
+        const result = await invoke<string>("save_transcript_to_file", { 
+          transcript: transcript,
+          filename: null 
+        });
+        console.log("Transcript saved:", result);
+        showError(`Files saved successfully!\n${result}`);
+      } else {
+        showError("Audio file saved, but no transcript available to save.");
+      }
+      
     } catch (error) {
       console.error("Error saving files:", error);
+      showError(`Error saving files: ${error}`);
     }
+  };
+
+  const toggleSettings = () => {
+    setShowSettings(!showSettings);
   };
 
   return (
@@ -162,33 +222,26 @@ function App() {
         </div>
       </header>
 
+      {error && (
+        <div className="error-banner">
+          <span className="error-message">{error}</span>
+          <button className="error-close" onClick={clearError}>×</button>
+        </div>
+      )}
+
       <main className="main">
         <div className="recording-section">
           <div className="timer">
             <h2>{formatTime(recordingTime)}</h2>
           </div>
 
-          <div className="audio-visualization">
-            <div className="waveform">
-              {Array.from({ length: 20 }, (_, i) => (
-                <div
-                  key={i}
-                  className={`bar ${isRecording ? 'active' : ''}`}
-                  style={{
-                    animationDelay: `${i * 0.1}s`,
-                    height: isRecording ? `${Math.random() * 40 + 10}px` : '4px'
-                  }}
-                ></div>
-              ))}
-            </div>
+          <div className="audio-indicator">
+            <div className={`audio-circle ${isRecording ? 'recording' : ''}`}></div>
           </div>
 
           <div className="controls">
             {!whisperInitialized && (
-              <button 
-                className="btn btn-secondary"
-                onClick={initializeWhisper}
-              >
+              <button className="btn btn-primary" onClick={initializeWhisper}>
                 Initialize Whisper
               </button>
             )}
@@ -210,8 +263,8 @@ function App() {
             </button>
 
             {lastRecordingPath && whisperInitialized && !isRecording && (
-              <button
-                className="btn btn-secondary"
+              <button 
+                className="btn btn-secondary" 
                 onClick={transcribeAudio}
                 disabled={isTranscribing}
               >
@@ -222,17 +275,20 @@ function App() {
         </div>
 
         <div className="transcript-section">
-          <h3>Transcript</h3>
-          {isRealtimeEnabled && isRecording && (
+          {isRealtimeEnabled && isRecording && realtimeTranscript && (
             <div className="realtime-transcript">
-              <h4>Real-time (Live)</h4>
+              <h3>
+                <span className="live-indicator"></span>
+                Real-time (Live)
+              </h3>
               <div className="transcript-area realtime">
-                {realtimeTranscript || "Listening for speech..."}
+                {realtimeTranscript}
               </div>
             </div>
           )}
+          
           <div className="final-transcript">
-            {(isRealtimeEnabled && isRecording) && <h4>Final Transcript</h4>}
+            {(isRealtimeEnabled && isRecording) && <h3>Final Transcript</h3>}
             <div className="transcript-area">
               {transcript || "Transcript will appear here after recording and transcription..."}
             </div>
@@ -243,7 +299,7 @@ function App() {
           <button className="action-btn" onClick={handleClear}>
             Clear
           </button>
-          <button className="action-btn">
+          <button className="action-btn" onClick={toggleSettings}>
             Settings
           </button>
           <button 
@@ -255,12 +311,35 @@ function App() {
           </button>
         </div>
 
-        <div className="footer">
-          Files saved to: Documents/MeetingRecorder/meeting_{new Date().toISOString().slice(0, 10)}_*
-        </div>
-      </main>
-    </div>
-  );
-}
+        {showSettings && (
+          <div className="settings-panel">
+            <h3>Settings</h3>
+            <div className="setting-group">
+              <label>Available Audio Devices:</label>
+              <div className="device-list">
+                {audioDevices.length > 0 ? (
+                  audioDevices.map((device, index) => (
+                    <div key={index} className="device-item">
+                      {device}
+                    </div>
+                  ))
+                ) : (
+                  <div className="device-item">No devices found</div>
+                )}
+              </div>
+              <button className="btn btn-secondary" onClick={loadAudioDevices}>
+                Refresh Devices
+              </button>
+            </div>
+          </div>
+        )}
 
-export default App;
+        <div className="footer">
+          Files saved to: Documents/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*
+        </div>
+    </main>
+      </div>
+    );
+  }
+
+  export default App;

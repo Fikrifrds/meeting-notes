@@ -17,6 +17,11 @@ pub struct AudioState {
     is_realtime_enabled: Arc<Mutex<bool>>,
     transcript_sender: Arc<Mutex<Option<mpsc::Sender<String>>>>,
     chunk_size: usize, // 30 seconds worth of samples at 16kHz
+    // New fields for improved audio handling
+    mic_data: Arc<Mutex<Vec<f32>>>,
+    system_data: Arc<Mutex<Vec<f32>>>,
+    mixed_data: Arc<Mutex<Vec<f32>>>,
+    target_sample_rate: u32,
 }
 
 impl Default for AudioState {
@@ -36,8 +41,53 @@ impl AudioState {
             is_realtime_enabled: Arc::new(Mutex::new(false)),
             transcript_sender: Arc::new(Mutex::new(None)),
             chunk_size: 16000 * 30, // 30 seconds at 16kHz
+            // Initialize new fields
+            mic_data: Arc::new(Mutex::new(Vec::new())),
+            system_data: Arc::new(Mutex::new(Vec::new())),
+            mixed_data: Arc::new(Mutex::new(Vec::new())),
+            target_sample_rate: 16000,
         }
     }
+}
+
+#[tauri::command]
+async fn get_audio_devices() -> Result<Vec<String>, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    
+    let host = cpal::default_host();
+    let mut devices = Vec::new();
+    
+    // Get input devices
+    let input_devices = host.input_devices()
+        .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
+    
+    for device in input_devices {
+        match device.name() {
+            Ok(name) => {
+                // Check if this is the default device
+                if let Some(default_device) = host.default_input_device() {
+                    if let Ok(default_name) = default_device.name() {
+                        if name == default_name {
+                            devices.push(format!("{} (Default)", name));
+                        } else {
+                            devices.push(name);
+                        }
+                    } else {
+                        devices.push(name);
+                    }
+                } else {
+                    devices.push(name);
+                }
+            }
+            Err(_) => devices.push("Unknown Device".to_string()),
+        }
+    }
+    
+    if devices.is_empty() {
+        return Err("No audio input devices found. Please check your microphone connection.".to_string());
+    }
+    
+    Ok(devices)
 }
 
 #[tauri::command]
@@ -147,8 +197,72 @@ async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String) -> R
     }
 }
 
-fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
-    // Simplified transcription for now - actual Whisper integration pending
+// Audio processing helper functions
+fn resample_audio(input: &[f32], input_rate: u32, output_rate: u32) -> Vec<f32> {
+    if input_rate == output_rate {
+        return input.to_vec();
+    }
+    
+    let ratio = input_rate as f64 / output_rate as f64;
+    let output_len = (input.len() as f64 / ratio) as usize;
+    let mut output = Vec::with_capacity(output_len);
+    
+    for i in 0..output_len {
+        let src_index = (i as f64 * ratio) as usize;
+        if src_index < input.len() {
+            // Linear interpolation for better quality
+            let next_index = (src_index + 1).min(input.len() - 1);
+            let fraction = (i as f64 * ratio) - src_index as f64;
+            let sample = input[src_index] * (1.0 - fraction as f32) + input[next_index] * fraction as f32;
+            output.push(sample);
+        }
+    }
+    
+    output
+}
+
+fn convert_i16_to_f32(input: &[i16]) -> Vec<f32> {
+    input.iter().map(|&sample| sample as f32 / 32768.0).collect()
+}
+
+fn convert_to_mono(input: &[f32], channels: u16) -> Vec<f32> {
+    if channels == 1 {
+        return input.to_vec();
+    }
+    
+    let mut mono = Vec::with_capacity(input.len() / channels as usize);
+    for chunk in input.chunks(channels as usize) {
+        let sum: f32 = chunk.iter().sum();
+        mono.push(sum / channels as f32);
+    }
+    mono
+}
+
+fn mix_audio_streams(mic_data: &[f32], system_data: &[f32], mic_gain: f32, system_gain: f32) -> Vec<f32> {
+    let max_len = mic_data.len().max(system_data.len());
+    let mut mixed = Vec::with_capacity(max_len);
+    
+    for i in 0..max_len {
+        let mic_sample = mic_data.get(i).copied().unwrap_or(0.0) * mic_gain;
+        let system_sample = system_data.get(i).copied().unwrap_or(0.0) * system_gain;
+        
+        // Mix with soft clipping to prevent distortion
+        let mixed_sample = mic_sample + system_sample;
+        let clipped = if mixed_sample > 1.0 {
+            1.0 - (1.0 / (1.0 + (mixed_sample - 1.0)))
+        } else if mixed_sample < -1.0 {
+            -1.0 + (1.0 / (1.0 + (-mixed_sample - 1.0)))
+        } else {
+            mixed_sample
+        };
+        
+        mixed.push(clipped);
+    }
+    
+    mixed
+}
+
+fn transcribe_with_whisper(_ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
     let duration = audio_data.len() as f32 / 16000.0;
     let sample_count = audio_data.len();
     
@@ -280,79 +394,249 @@ fn start_audio_capture_with_realtime(
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     
     let host = cpal::default_host();
-    let device = host.default_input_device()
-        .ok_or("No input device available")?;
+    let target_sample_rate = 16000u32; // Whisper's preferred sample rate
     
-    let config = device.default_input_config()
-        .map_err(|e| format!("Failed to get default input config: {}", e))?;
+    // Get microphone device
+    let mic_device = host.default_input_device()
+        .ok_or_else(|| "No microphone device available. Please check your microphone connection.".to_string())?;
     
-    let _sample_rate = config.sample_rate().0;
-    let channels = config.channels();
+    let mic_name = mic_device.name().unwrap_or_else(|_| "Unknown Microphone".to_string());
+    println!("Using microphone: {}", mic_name);
     
-    // Clone the Arc for each closure
-    let is_recording_f32 = is_recording.clone();
-    let recording_data_f32 = recording_data.clone();
-    let is_recording_i16 = is_recording.clone();
-    let recording_data_i16 = recording_data.clone();
+    // Get microphone configuration
+    let mic_config = mic_device.default_input_config()
+        .map_err(|e| format!("Failed to get microphone config: {}. Please check microphone permissions.", e))?;
     
-    let stream = match config.sample_format() {
+    println!("Microphone config: {:?}", mic_config);
+    
+    let mic_sample_rate = mic_config.sample_rate().0;
+    let mic_channels = mic_config.channels();
+    
+    // Try to get system audio device (loopback)
+    let system_device = host.output_devices()
+        .map_err(|e| format!("Failed to enumerate output devices: {}", e))?
+        .find(|device| {
+            if let Ok(name) = device.name() {
+                // Look for system audio/loopback devices
+                name.to_lowercase().contains("loopback") || 
+                name.to_lowercase().contains("system") ||
+                name.to_lowercase().contains("stereo mix") ||
+                name.to_lowercase().contains("what u hear")
+            } else {
+                false
+            }
+        });
+    
+    // If no dedicated loopback device, try to use default output as input (macOS specific)
+    let system_device = system_device.or_else(|| {
+        // On macOS, we might need to use a different approach
+        host.input_devices().ok()?.find(|device| {
+            if let Ok(name) = device.name() {
+                name.to_lowercase().contains("soundflower") ||
+                name.to_lowercase().contains("blackhole") ||
+                name.to_lowercase().contains("loopback")
+            } else {
+                false
+            }
+        })
+    });
+    
+    // Shared buffers for audio data
+    let mic_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let system_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    
+    // Clone references for closures
+    let mic_buffer_clone = mic_buffer.clone();
+    let system_buffer_clone = system_buffer.clone();
+    let is_recording_mic = is_recording.clone();
+    let is_recording_system = is_recording.clone();
+    let mic_name_clone = mic_name.clone();
+    
+    // Start microphone capture
+    let mic_stream = match mic_config.sample_format() {
         cpal::SampleFormat::F32 => {
-            device.build_input_stream(
-                &config.into(),
+            mic_device.build_input_stream(
+                &mic_config.into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if let Ok(is_rec) = is_recording_f32.lock() {
+                    if let Ok(is_rec) = is_recording_mic.lock() {
                         if *is_rec {
-                            if let Ok(mut recording) = recording_data_f32.lock() {
-                                // Convert to mono if stereo
-                                if channels == 2 {
-                                    for chunk in data.chunks(2) {
-                                        if chunk.len() == 2 {
-                                            recording.push((chunk[0] + chunk[1]) / 2.0);
-                                        }
-                                    }
+                            if let Ok(mut buffer) = mic_buffer_clone.lock() {
+                                // Convert to mono and resample if needed
+                                let mono_data = convert_to_mono(data, mic_channels);
+                                let resampled = if mic_sample_rate != target_sample_rate {
+                                    resample_audio(&mono_data, mic_sample_rate, target_sample_rate)
                                 } else {
-                                    recording.extend_from_slice(data);
-                                }
+                                    mono_data
+                                };
+                                buffer.extend_from_slice(&resampled);
                             }
                         }
                     }
                 },
-                |err| eprintln!("Audio input error: {}", err),
+                move |err| eprintln!("Microphone error on '{}': {}", mic_name_clone, err),
                 None,
             )
         }
         cpal::SampleFormat::I16 => {
-            device.build_input_stream(
-                &config.into(),
+            mic_device.build_input_stream(
+                &mic_config.into(),
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    if let Ok(is_rec) = is_recording_i16.lock() {
+                    if let Ok(is_rec) = is_recording_mic.lock() {
                         if *is_rec {
-                            if let Ok(mut recording) = recording_data_i16.lock() {
-                                // Convert to f32 and mono if needed
-                                if channels == 2 {
-                                    for chunk in data.chunks(2) {
-                                        if chunk.len() == 2 {
-                                            let sample = (chunk[0] as f32 + chunk[1] as f32) / (2.0 * i16::MAX as f32);
-                                            recording.push(sample);
-                                        }
-                                    }
+                            if let Ok(mut buffer) = mic_buffer_clone.lock() {
+                                // Convert I16 to F32, then to mono and resample
+                                let f32_data = convert_i16_to_f32(data);
+                                let mono_data = convert_to_mono(&f32_data, mic_channels);
+                                let resampled = if mic_sample_rate != target_sample_rate {
+                                    resample_audio(&mono_data, mic_sample_rate, target_sample_rate)
                                 } else {
-                                    for &sample in data {
-                                        recording.push(sample as f32 / i16::MAX as f32);
-                                    }
-                                }
+                                    mono_data
+                                };
+                                buffer.extend_from_slice(&resampled);
                             }
                         }
                     }
                 },
-                |err| eprintln!("Audio input error: {}", err),
+                move |err| eprintln!("Microphone error on '{}': {}", mic_name_clone, err),
                 None,
             )
         }
-        _ => return Err("Unsupported sample format".to_string()),
-    }.map_err(|e| format!("Failed to build input stream: {}", e))?;
+        _ => return Err(format!("Unsupported microphone sample format: {:?}", mic_config.sample_format())),
+    }.map_err(|e| format!("Failed to build microphone stream: {}", e))?;
     
-    stream.play().map_err(|e| format!("Failed to start stream: {}", e))?;
+    // Start system audio capture if available
+    let system_stream = if let Some(sys_device) = system_device {
+        let sys_name = sys_device.name().unwrap_or_else(|_| "Unknown System Audio".to_string());
+        println!("Using system audio: {}", sys_name);
+        
+        let sys_config = sys_device.default_input_config()
+            .map_err(|e| format!("Failed to get system audio config: {}", e))?;
+        
+        println!("System audio config: {:?}", sys_config);
+        
+        let sys_sample_rate = sys_config.sample_rate().0;
+        let sys_channels = sys_config.channels();
+        let sys_name_clone = sys_name.clone();
+        
+        let stream = match sys_config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                sys_device.build_input_stream(
+                    &sys_config.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if let Ok(is_rec) = is_recording_system.lock() {
+                            if *is_rec {
+                                if let Ok(mut buffer) = system_buffer_clone.lock() {
+                                    // Convert to mono and resample if needed
+                                    let mono_data = convert_to_mono(data, sys_channels);
+                                    let resampled = if sys_sample_rate != target_sample_rate {
+                                        resample_audio(&mono_data, sys_sample_rate, target_sample_rate)
+                                    } else {
+                                        mono_data
+                                    };
+                                    buffer.extend_from_slice(&resampled);
+                                }
+                            }
+                        }
+                    },
+                    move |err| eprintln!("System audio error on '{}': {}", sys_name_clone, err),
+                    None,
+                )
+            }
+            cpal::SampleFormat::I16 => {
+                sys_device.build_input_stream(
+                    &sys_config.into(),
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        if let Ok(is_rec) = is_recording_system.lock() {
+                            if *is_rec {
+                                if let Ok(mut buffer) = system_buffer_clone.lock() {
+                                    // Convert I16 to F32, then to mono and resample
+                                    let f32_data = convert_i16_to_f32(data);
+                                    let mono_data = convert_to_mono(&f32_data, sys_channels);
+                                    let resampled = if sys_sample_rate != target_sample_rate {
+                                        resample_audio(&mono_data, sys_sample_rate, target_sample_rate)
+                                    } else {
+                                        mono_data
+                                    };
+                                    buffer.extend_from_slice(&resampled);
+                                }
+                            }
+                        }
+                    },
+                    move |err| eprintln!("System audio error on '{}': {}", sys_name_clone, err),
+                    None,
+                )
+            }
+            _ => return Err(format!("Unsupported system audio sample format: {:?}", sys_config.sample_format())),
+        }.map_err(|e| format!("Failed to build system audio stream: {}", e))?;
+        
+        Some(stream)
+    } else {
+        println!("No system audio device found. Recording microphone only.");
+        println!("To record system audio on macOS, install BlackHole or Soundflower.");
+        None
+    };
+    
+    // Start streams
+    mic_stream.play().map_err(|e| format!("Failed to start microphone stream: {}", e))?;
+    if let Some(ref stream) = system_stream {
+        stream.play().map_err(|e| format!("Failed to start system audio stream: {}", e))?;
+    }
+    
+    // Audio mixing and processing thread
+    let recording_data_clone = recording_data.clone();
+    let is_recording_mixer = is_recording.clone();
+    let mic_buffer_mixer = mic_buffer.clone();
+    let system_buffer_mixer = system_buffer.clone();
+    
+    thread::spawn(move || {
+        let mut last_mic_len = 0;
+        let mut last_system_len = 0;
+        
+        loop {
+            thread::sleep(Duration::from_millis(100)); // Mix every 100ms
+            
+            // Check if still recording
+            if let Ok(is_rec) = is_recording_mixer.lock() {
+                if !*is_rec {
+                    break;
+                }
+            }
+            
+            // Get current audio data
+            let (mic_data, system_data) = {
+                let mic_guard = mic_buffer_mixer.lock().unwrap();
+                let system_guard = system_buffer_mixer.lock().unwrap();
+                
+                let new_mic_data = if mic_guard.len() > last_mic_len {
+                    mic_guard[last_mic_len..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                
+                let new_system_data = if system_guard.len() > last_system_len {
+                    system_guard[last_system_len..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                
+                last_mic_len = mic_guard.len();
+                last_system_len = system_guard.len();
+                
+                (new_mic_data, new_system_data)
+            };
+            
+            // Mix audio streams if we have new data
+            if !mic_data.is_empty() || !system_data.is_empty() {
+                // Mix with appropriate gains (mic slightly louder for clarity)
+                let mixed = mix_audio_streams(&mic_data, &system_data, 0.7, 0.5);
+                
+                // Add to main recording buffer
+                if let Ok(mut recording) = recording_data_clone.lock() {
+                    recording.extend_from_slice(&mixed);
+                }
+            }
+        }
+    });
     
     // Real-time transcription processing thread
     let recording_data_rt = recording_data.clone();
@@ -417,7 +701,7 @@ fn start_audio_capture_with_realtime(
         }
     });
     
-    // Keep the stream alive while recording
+    // Keep the streams alive while recording
     loop {
         thread::sleep(Duration::from_millis(100));
         if let Ok(is_rec) = is_recording.lock() {
@@ -497,6 +781,53 @@ async fn save_files(state: State<'_, AudioState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn save_transcript_to_file(transcript: String, filename: Option<String>) -> Result<String, String> {
+    use std::fs;
+    use std::io::Write;
+    
+    if transcript.trim().is_empty() {
+        return Err("No transcript content to save".to_string());
+    }
+    
+    // Create the output directory
+    let home_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?;
+    let output_dir = home_dir.join("Documents").join("MeetingRecordings");
+    
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    
+    // Generate filename if not provided
+    let file_name = filename.unwrap_or_else(|| {
+        let now = chrono::Utc::now();
+        format!("meeting_{}.txt", now.format("%Y-%m-%d_%H-%M-%S"))
+    });
+    
+    let file_path = output_dir.join(&file_name);
+    
+    // Write transcript to file
+    let mut file = fs::File::create(&file_path)
+        .map_err(|e| format!("Failed to create transcript file: {}", e))?;
+    
+    // Add metadata header
+    let now = chrono::Utc::now();
+    let header = format!(
+        "Meeting Transcript\nGenerated: {}\nFile: {}\n{}\n\n",
+        now.format("%Y-%m-%d %H:%M:%S UTC"),
+        file_name,
+        "=".repeat(50)
+    );
+    
+    file.write_all(header.as_bytes())
+        .map_err(|e| format!("Failed to write header to transcript file: {}", e))?;
+    
+    file.write_all(transcript.as_bytes())
+        .map_err(|e| format!("Failed to write transcript to file: {}", e))?;
+    
+    Ok(format!("Transcript saved to: {}", file_path.display()))
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
@@ -509,7 +840,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_recording, 
             stop_recording, 
-            save_files, 
+            save_files,
+            save_transcript_to_file,
+            get_audio_devices,
             initialize_whisper,
             transcribe_audio,
             enable_realtime_transcription,
