@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
@@ -22,6 +22,7 @@ pub struct AudioState {
     system_data: Arc<Mutex<Vec<f32>>>,
     mixed_data: Arc<Mutex<Vec<f32>>>,
     target_sample_rate: u32,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
 }
 
 impl Default for AudioState {
@@ -46,6 +47,7 @@ impl AudioState {
             system_data: Arc::new(Mutex::new(Vec::new())),
             mixed_data: Arc::new(Mutex::new(Vec::new())),
             target_sample_rate: 16000,
+            app_handle: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -262,22 +264,67 @@ fn mix_audio_streams(mic_data: &[f32], system_data: &[f32], mic_gain: f32, syste
     mixed
 }
 
-fn transcribe_with_whisper(_ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
+fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
+    use whisper_rs::{WhisperState, FullParams, SamplingStrategy};
+    
     let duration = audio_data.len() as f32 / 16000.0;
-    let sample_count = audio_data.len();
     
-    // Simulate processing time
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Check if audio is too short
+    if audio_data.len() < 1600 { // Less than 0.1 seconds at 16kHz
+        return Ok("(Audio too short for transcription)".to_string());
+    }
     
-    // Return a simulated transcript based on audio characteristics
-    if sample_count < 8000 { // Less than 0.5 seconds
-        Ok("(Audio too short)".to_string())
-    } else if duration < 2.0 {
-        Ok("Hello, this is a test transcription.".to_string())
-    } else if duration < 10.0 {
-        Ok("This is a longer test transcription. The audio processing is working correctly.".to_string())
+    // Create a new state for this transcription
+    let mut state = ctx.create_state()
+        .map_err(|e| format!("Failed to create Whisper state: {}", e))?;
+    
+    // Set up parameters for transcription
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    
+    // Configure parameters for better transcription
+    params.set_n_threads(4); // Use 4 threads for faster processing
+    params.set_translate(false); // Don't translate, keep original language
+    params.set_language(Some("en")); // Set to English (can be made configurable)
+    params.set_print_progress(false); // Don't print progress to console
+    params.set_print_realtime(false); // Don't print realtime output
+    params.set_print_timestamps(false); // Don't print timestamps
+    
+    // Run the transcription
+    state.full(params, audio_data)
+        .map_err(|e| format!("Whisper transcription failed: {}", e))?;
+    
+    // Get the number of segments
+    let num_segments = state.full_n_segments()
+        .map_err(|e| format!("Failed to get segment count: {}", e))?;
+    
+    if num_segments == 0 {
+        return Ok("(No speech detected)".to_string());
+    }
+    
+    // Collect all transcribed text
+    let mut full_text = String::new();
+    
+    for i in 0..num_segments {
+        match state.full_get_segment_text(i) {
+            Ok(text) => {
+                if !full_text.is_empty() {
+                    full_text.push(' ');
+                }
+                full_text.push_str(&text);
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to get segment {} text: {}", i, e);
+            }
+        }
+    }
+    
+    // Clean up the text (remove extra whitespace)
+    let cleaned_text = full_text.trim().to_string();
+    
+    if cleaned_text.is_empty() {
+        Ok("(No speech detected)".to_string())
     } else {
-        Ok(format!("Extended transcription for {:.1} second audio clip. Real Whisper integration will be implemented once the API compatibility is resolved.", duration))
+        Ok(cleaned_text)
     }
 }
 
@@ -339,7 +386,7 @@ fn load_audio_file(path: &str) -> Result<Vec<f32>, String> {
 }
 
 #[tauri::command]
-async fn start_recording(state: State<'_, AudioState>) -> Result<String, String> {
+async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) -> Result<String, String> {
     let mut is_recording = state.is_recording.lock().map_err(|e| e.to_string())?;
     let mut start_time = state.start_time.lock().map_err(|e| e.to_string())?;
     let mut output_path = state.output_path.lock().map_err(|e| e.to_string())?;
@@ -362,11 +409,18 @@ async fn start_recording(state: State<'_, AudioState>) -> Result<String, String>
     *is_recording = true;
     recording_data.clear();
     
+    // Store app handle for event emission
+    {
+        let mut app_handle_guard = state.app_handle.lock().map_err(|e| e.to_string())?;
+        *app_handle_guard = Some(app_handle);
+    }
+    
     // Start actual audio recording in a separate thread
     let recording_data_clone = state.recording_data.clone();
     let is_recording_clone = state.is_recording.clone();
     let whisper_context_clone = state.whisper_context.clone();
     let is_realtime_clone = state.is_realtime_enabled.clone();
+    let app_handle_clone = state.app_handle.clone();
     let chunk_size = state.chunk_size;
     
     thread::spawn(move || {
@@ -375,6 +429,7 @@ async fn start_recording(state: State<'_, AudioState>) -> Result<String, String>
             is_recording_clone,
             whisper_context_clone,
             is_realtime_clone,
+            app_handle_clone,
             chunk_size
         ) {
             eprintln!("Audio capture error: {}", e);
@@ -389,6 +444,7 @@ fn start_audio_capture_with_realtime(
     is_recording: Arc<Mutex<bool>>,
     whisper_context: Arc<Mutex<Option<WhisperContext>>>,
     is_realtime_enabled: Arc<Mutex<bool>>,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
     chunk_size: usize,
 ) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -627,8 +683,8 @@ fn start_audio_capture_with_realtime(
             
             // Mix audio streams if we have new data
             if !mic_data.is_empty() || !system_data.is_empty() {
-                // Mix with appropriate gains (mic slightly louder for clarity)
-                let mixed = mix_audio_streams(&mic_data, &system_data, 0.7, 0.5);
+                // Mix with higher gains for better volume (increased from 0.7/0.5 to 1.2/0.8)
+                let mixed = mix_audio_streams(&mic_data, &system_data, 1.2, 0.8);
                 
                 // Add to main recording buffer
                 if let Ok(mut recording) = recording_data_clone.lock() {
@@ -643,6 +699,7 @@ fn start_audio_capture_with_realtime(
     let is_recording_rt = is_recording.clone();
     let whisper_context_rt = whisper_context.clone();
     let is_realtime_rt = is_realtime_enabled.clone();
+    let app_handle_rt = app_handle.clone();
     
     thread::spawn(move || {
         let mut last_processed = 0;
@@ -679,13 +736,19 @@ fn start_audio_capture_with_realtime(
                     
                     // Transcribe chunk in background
                     let whisper_ctx = whisper_context_rt.clone();
+                    let app_handle_chunk = app_handle_rt.clone();
                     thread::spawn(move || {
                         if let Ok(ctx_guard) = whisper_ctx.lock() {
                             if let Some(ref ctx) = *ctx_guard {
                                 match transcribe_with_whisper(ctx, &chunk) {
                                     Ok(transcript) => {
                                         println!("Real-time transcript: {}", transcript);
-                                        // TODO: Send to frontend via event
+                                        // Send to frontend via event
+                                        if let Ok(app_guard) = app_handle_chunk.lock() {
+                                            if let Some(ref app) = *app_guard {
+                                                let _ = app.emit("realtime-transcript", &transcript);
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("Real-time transcription error: {}", e);
@@ -724,6 +787,7 @@ fn start_audio_capture(
         is_recording,
         Arc::new(Mutex::new(None)),
         Arc::new(Mutex::new(false)),
+        Arc::new(Mutex::new(None)),
         0
     )
 }

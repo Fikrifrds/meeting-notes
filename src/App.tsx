@@ -38,6 +38,40 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Listen for real-time transcription events
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    
+    const setupListener = async () => {
+      try {
+        // Import listen dynamically to ensure it's available
+        const { listen: listenFn } = await import("@tauri-apps/api/event");
+        
+        unlisten = await listenFn<string>('realtime-transcript', (event) => {
+          console.log('Received real-time transcript:', event.payload);
+          setRealtimeTranscript(prev => {
+            // Append new transcript with a space if there's existing content
+            return prev ? `${prev} ${event.payload}` : event.payload;
+          });
+        });
+        
+        console.log('Real-time transcript listener setup successfully');
+      } catch (error) {
+        console.error('Failed to setup real-time transcript listener:', error);
+      }
+    };
+    
+    // Delay setup to ensure Tauri is fully loaded
+    const timer = setTimeout(setupListener, 1000);
+    
+    return () => {
+      clearTimeout(timer);
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
+
   const clearError = () => setError(null);
 
   const showError = (message: string) => {
