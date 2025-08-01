@@ -56,20 +56,34 @@ cargo --version
 
 ### 2. Download Whisper Model
 
-The application requires a Whisper AI model for transcription:
+The application requires a Whisper AI model for transcription. The script now supports multiple model options for different accuracy and speed requirements:
 
 ```bash
 # Make the script executable (macOS/Linux)
 chmod +x download-whisper-model.sh
 
-# Download the model (this may take a few minutes)
+# Download the model (interactive menu will appear)
 ./download-whisper-model.sh
+```
+
+**Model Options:**
+- **large-v3-turbo** (RECOMMENDED): Best accuracy + speed balance (1.5GB)
+- **small.en**: Good upgrade from base, faster processing (466MB)
+- **medium.en**: High accuracy for important meetings (1.5GB)
+- **base.en**: Fallback option, fastest but lower accuracy (142MB)
+
+**Quick Download (command line):**
+```bash
+# Download specific model directly
+./download-whisper-model.sh large-v3-turbo  # Recommended
+./download-whisper-model.sh small.en        # Good balance
+./download-whisper-model.sh all             # Download all models
 ```
 
 **Manual Download (if script fails):**
 1. Create directory: `mkdir -p ~/Documents/MeetingRecordings/models`
-2. Download model: [ggml-base.en.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin)
-3. Save to: `~/Documents/MeetingRecordings/models/ggml-base.en.bin`
+2. Download any model from [Hugging Face Whisper models](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+3. Save to: `~/Documents/MeetingRecordings/models/ggml-[model-name].bin`
 
 ### 3. Start Development
 
@@ -238,14 +252,17 @@ Optimized for Tauri development:
 
 #### Whisper Model Problems
 ```bash
-# Check if model exists
+# Check if any models exist
 ls -la ~/Documents/MeetingRecordings/models/
 
-# Re-download if missing
+# Re-download or upgrade model
 ./download-whisper-model.sh
 
-# Manual verification
-file ~/Documents/MeetingRecordings/models/ggml-base.en.bin
+# Download specific model for better accuracy
+./download-whisper-model.sh large-v3-turbo
+
+# Manual verification (check any model file)
+file ~/Documents/MeetingRecordings/models/ggml-*.bin
 ```
 
 #### Audio Recording Issues

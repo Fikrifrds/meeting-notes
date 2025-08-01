@@ -49,7 +49,7 @@ impl AudioState {
             recording_data: Arc::new(Mutex::new(Vec::new())),
             is_realtime_enabled: Arc::new(Mutex::new(false)),
             transcript_sender: Arc::new(Mutex::new(None)),
-            chunk_size: 16000 * 30, // 30 seconds at 16kHz
+            chunk_size: 16000 * 10, // 30 seconds at 16kHz
             // Initialize new fields
             mic_data: Arc::new(Mutex::new(Vec::new())),
             system_data: Arc::new(Mutex::new(Vec::new())),
@@ -268,14 +268,39 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     let models_dir = home_dir.join("Documents").join("MeetingRecordings").join("models");
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
     
-    let model_path = models_dir.join("ggml-base.en.bin");
+    // Try multiple model options in order of preference
+    let model_options = [
+        ("ggml-small.en.bin", "Small English (PRIORITIZED: Better accuracy than base)"),
+        ("ggml-large-v3-turbo.bin", "Large V3 Turbo (Best: High accuracy + Fast speed)"),
+        ("ggml-base.en.bin", "Base English (Current fallback)"),
+        ("ggml-medium.en.bin", "Medium English (High accuracy)"),
+    ];
     
-    if !model_path.exists() {
-        return Err(format!(
-            "Whisper model not found at: {}\nPlease download ggml-base.en.bin from https://huggingface.co/ggerganov/whisper.cpp/tree/main", 
-            model_path.display()
-        ));
+    let mut model_path = None;
+    let mut model_info = String::new();
+    
+    for (filename, description) in &model_options {
+        let path = models_dir.join(filename);
+        if path.exists() {
+            model_path = Some(path);
+            model_info = format!("Using {}: {}", filename, description);
+            break;
+        }
     }
+    
+    let model_path = model_path.ok_or_else(|| {
+        format!(
+            "No Whisper model found. Please download one of these models to {}:\n\
+            1. ggml-small.en.bin (PRIORITIZED - Good upgrade from base)\n\
+            2. ggml-large-v3-turbo.bin (RECOMMENDED - Best accuracy + speed)\n\
+            3. ggml-medium.en.bin (High accuracy)\n\
+            4. ggml-base.en.bin (Current fallback)\n\n\
+            Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main", 
+            models_dir.display()
+        )
+    })?;
+    
+    println!("🎙️ {}", model_info);
     
     // Initialize Whisper context
     let ctx_params = WhisperContextParameters::default();
