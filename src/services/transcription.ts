@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createAssemblyAIService, AssemblyAIService } from './assemblyai';
 
 export type TranscriptionMode = 'basic' | 'advanced';
@@ -14,6 +15,8 @@ export class TranscriptionService {
   private assemblyAIService?: AssemblyAIService;
   private assemblyAIApiKey?: string;
   private enableSpeakerDiarization: boolean;
+  private isStreaming: boolean = false;
+  private streamingUnlisteners: (() => void)[] = [];
 
   constructor(config: TranscriptionConfig) {
     this.mode = config.mode;
@@ -75,15 +78,15 @@ export class TranscriptionService {
   }
 
   /**
-   * Enable or disable real-time transcription
+   * Enable real-time transcription
    */
   async enableRealtimeTranscription(): Promise<string> {
     if (this.mode === 'basic') {
       return await invoke<string>('enable_realtime_transcription');
+    } else if (this.mode === 'advanced' && this.assemblyAIApiKey) {
+      return await this.startAssemblyAIStreaming();
     } else {
-      // For advanced mode, we would need to implement real-time streaming
-      // This is more complex and would require backend integration
-      throw new Error('Real-time transcription with AssemblyAI not yet implemented');
+      throw new Error('Invalid transcription mode or missing configuration');
     }
   }
 
@@ -93,9 +96,132 @@ export class TranscriptionService {
   async disableRealtimeTranscription(): Promise<string> {
     if (this.mode === 'basic') {
       return await invoke<string>('disable_realtime_transcription');
+    } else if (this.mode === 'advanced') {
+      return await this.stopAssemblyAIStreaming();
     } else {
-      return 'Advanced mode real-time transcription disabled';
+      return 'Real-time transcription disabled';
     }
+  }
+
+  /**
+   * Start AssemblyAI streaming
+   */
+  private async startAssemblyAIStreaming(): Promise<string> {
+    if (!this.assemblyAIApiKey) {
+      throw new Error('AssemblyAI API key not provided');
+    }
+
+    if (this.isStreaming) {
+      return 'AssemblyAI streaming already active';
+    }
+
+    try {
+      // Set up event listeners for streaming events
+      const partialUnlisten = await listen('assemblyai-partial-transcript', (event) => {
+        console.log('Partial transcript:', event.payload);
+        // Emit custom event for UI to handle
+        window.dispatchEvent(new CustomEvent('assemblyai-partial-transcript', { 
+          detail: event.payload 
+        }));
+      });
+
+      const finalUnlisten = await listen('assemblyai-final-transcript', (event) => {
+        console.log('Final transcript:', event.payload);
+        // Emit custom event for UI to handle
+        window.dispatchEvent(new CustomEvent('assemblyai-final-transcript', { 
+          detail: event.payload 
+        }));
+      });
+
+      const sessionBeginsUnlisten = await listen('assemblyai-session-begins', (event) => {
+        console.log('AssemblyAI session started:', event.payload);
+        this.isStreaming = true;
+        window.dispatchEvent(new CustomEvent('assemblyai-session-begins', { 
+          detail: event.payload 
+        }));
+      });
+
+      const sessionTerminatedUnlisten = await listen('assemblyai-session-terminated', (event) => {
+        console.log('AssemblyAI session ended:', event.payload);
+        this.isStreaming = false;
+        this.cleanupStreamingListeners();
+        window.dispatchEvent(new CustomEvent('assemblyai-session-terminated', { 
+          detail: event.payload 
+        }));
+      });
+
+      const errorUnlisten = await listen('assemblyai-error', (event) => {
+        console.error('AssemblyAI error:', event.payload);
+        this.isStreaming = false;
+        this.cleanupStreamingListeners();
+        window.dispatchEvent(new CustomEvent('assemblyai-error', { 
+          detail: event.payload 
+        }));
+      });
+
+      const turnUnlisten = await listen('assemblyai-turn', (event) => {
+        console.log('AssemblyAI turn:', event.payload);
+        // Emit custom event for UI to handle speaker turns
+        window.dispatchEvent(new CustomEvent('assemblyai-turn', { 
+          detail: event.payload 
+        }));
+      });
+
+      // Store unlisteners for cleanup
+      this.streamingUnlisteners = [
+        partialUnlisten,
+        finalUnlisten,
+        sessionBeginsUnlisten,
+        sessionTerminatedUnlisten,
+        errorUnlisten,
+        turnUnlisten
+      ];
+
+      // Start the streaming session
+      const result = await invoke<string>('start_assemblyai_streaming', {
+        apiKey: this.assemblyAIApiKey,
+        enableSpeakerDiarization: this.enableSpeakerDiarization
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Failed to start AssemblyAI streaming:', error);
+      this.cleanupStreamingListeners();
+      throw new Error(`Failed to start AssemblyAI streaming: ${error}`);
+    }
+  }
+
+  /**
+   * Stop AssemblyAI streaming
+   */
+  private async stopAssemblyAIStreaming(): Promise<string> {
+    if (!this.isStreaming) {
+      return 'AssemblyAI streaming not active';
+    }
+
+    this.isStreaming = false;
+    this.cleanupStreamingListeners();
+    
+    // Emit event to notify UI
+    window.dispatchEvent(new CustomEvent('assemblyai-session-terminated', { 
+      detail: 'Streaming stopped by user' 
+    }));
+
+    return 'AssemblyAI streaming stopped';
+  }
+
+  /**
+   * Clean up streaming event listeners
+   */
+  private cleanupStreamingListeners(): void {
+    this.streamingUnlisteners.forEach(unlisten => {
+      try {
+        unlisten();
+      } catch (error) {
+        console.warn('Error cleaning up listener:', error);
+      }
+    });
+    this.streamingUnlisteners = [];
   }
 
   /**
@@ -109,6 +235,11 @@ export class TranscriptionService {
    * Switch transcription mode
    */
   switchMode(mode: TranscriptionMode, assemblyAIApiKey?: string): void {
+    // Clean up any active streaming when switching modes
+    if (this.isStreaming) {
+      this.stopAssemblyAIStreaming();
+    }
+
     this.mode = mode;
     this.assemblyAIApiKey = assemblyAIApiKey;
     
@@ -131,6 +262,13 @@ export class TranscriptionService {
    */
   setSpeakerDiarization(enabled: boolean): void {
     this.enableSpeakerDiarization = enabled;
+  }
+
+  /**
+   * Check if streaming is currently active
+   */
+  isStreamingActive(): boolean {
+    return this.isStreaming;
   }
 }
 

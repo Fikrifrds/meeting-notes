@@ -108,12 +108,14 @@ function App() {
   // Listen for real-time transcription events
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let assemblyAIListeners: (() => void)[] = [];
     
     const setupListener = async () => {
       try {
         // Import listen dynamically to ensure it's available
         const { listen: listenFn } = await import("@tauri-apps/api/event");
         
+        // Whisper real-time transcription
         unlisten = await listenFn<string>('realtime-transcript', (event) => {
           console.log('Received real-time transcript:', event.payload);
           setRealtimeTranscript(prev => {
@@ -127,15 +129,94 @@ function App() {
         console.error('Failed to setup real-time transcript listener:', error);
       }
     };
+
+    // Setup AssemblyAI streaming event listeners
+    const setupAssemblyAIListeners = () => {
+      const partialListener = (event: CustomEvent) => {
+        console.log('AssemblyAI partial transcript:', event.detail);
+        setRealtimeTranscript(prev => {
+          // For partial transcripts, replace the last partial with the new one
+          const lines = prev.split('\n');
+          if (lines.length > 0 && lines[lines.length - 1].startsWith('[Partial]')) {
+            lines[lines.length - 1] = `[Partial] ${event.detail}`;
+          } else {
+            lines.push(`[Partial] ${event.detail}`);
+          }
+          return lines.join('\n');
+        });
+      };
+
+      const finalListener = (event: CustomEvent) => {
+        console.log('AssemblyAI final transcript:', event.detail);
+        setRealtimeTranscript(prev => {
+          // Replace partial with final transcript
+          const lines = prev.split('\n');
+          if (lines.length > 0 && lines[lines.length - 1].startsWith('[Partial]')) {
+            lines[lines.length - 1] = event.detail;
+          } else {
+            lines.push(event.detail);
+          }
+          return lines.join('\n');
+        });
+      };
+
+      const sessionBeginsListener = (event: CustomEvent) => {
+        console.log('AssemblyAI session started:', event.detail);
+        setRealtimeTranscript('🔴 AssemblyAI streaming session started...\n');
+      };
+
+      const sessionTerminatedListener = (event: CustomEvent) => {
+        console.log('AssemblyAI session ended:', event.detail);
+        setRealtimeTranscript(prev => prev + '\n🔴 AssemblyAI streaming session ended.');
+      };
+
+      const errorListener = (event: CustomEvent) => {
+        console.error('AssemblyAI error:', event.detail);
+        showError(`AssemblyAI streaming error: ${event.detail}`);
+      };
+
+      const turnListener = (event: CustomEvent) => {
+        console.log('AssemblyAI turn:', event.detail);
+        const turnData = event.detail;
+        if (turnData && turnData.transcript) {
+          const speakerLabel = turnData.speaker ? `Speaker ${turnData.speaker}` : 'Unknown Speaker';
+          const turnText = `\n[${speakerLabel}]: ${turnData.transcript}`;
+          setRealtimeTranscript(prev => prev + turnText);
+        }
+      };
+
+      // Add event listeners
+      window.addEventListener('assemblyai-partial-transcript', partialListener);
+      window.addEventListener('assemblyai-final-transcript', finalListener);
+      window.addEventListener('assemblyai-session-begins', sessionBeginsListener);
+      window.addEventListener('assemblyai-session-terminated', sessionTerminatedListener);
+      window.addEventListener('assemblyai-error', errorListener);
+      window.addEventListener('assemblyai-turn', turnListener);
+
+      // Store cleanup functions
+      assemblyAIListeners = [
+        () => window.removeEventListener('assemblyai-partial-transcript', partialListener),
+        () => window.removeEventListener('assemblyai-final-transcript', finalListener),
+        () => window.removeEventListener('assemblyai-session-begins', sessionBeginsListener),
+        () => window.removeEventListener('assemblyai-session-terminated', sessionTerminatedListener),
+        () => window.removeEventListener('assemblyai-error', errorListener),
+        () => window.removeEventListener('assemblyai-turn', turnListener),
+      ];
+    };
     
     // Delay setup to ensure Tauri is fully loaded
-    const timer = setTimeout(setupListener, 1000);
+    const timer = setTimeout(() => {
+      setupListener();
+      setupAssemblyAIListeners();
+    }, 1000);
     
     return () => {
       clearTimeout(timer);
       if (unlisten) {
         unlisten();
       }
+      // Clean up AssemblyAI listeners
+      assemblyAIListeners.forEach(cleanup => cleanup());
     };
   }, []);
 
@@ -242,11 +323,20 @@ function App() {
   const toggleRealtimeTranscription = async () => {
     try {
       clearError();
+      
+      if (!transcriptionService) {
+        showError("Transcription service not initialized. Please wait for initialization to complete.");
+        return;
+      }
+      
       if (isRealtimeEnabled) {
-        await invoke("disable_realtime_transcription");
+        const result = await transcriptionService.disableRealtimeTranscription();
+        console.log("Real-time transcription disabled:", result);
         setIsRealtimeEnabled(false);
+        setRealtimeTranscript("");
       } else {
-        await invoke("enable_realtime_transcription");
+        const result = await transcriptionService.enableRealtimeTranscription();
+        console.log("Real-time transcription enabled:", result);
         setIsRealtimeEnabled(true);
       }
     } catch (error) {
@@ -435,6 +525,23 @@ function App() {
                   {isRecording ? 'Recording' : 'Ready'}
                 </span>
               </div>
+              
+              {/* Transcription Mode Indicator */}
+              <div className="flex items-center space-x-2">
+                <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+                  transcriptionMode === 'advanced' 
+                    ? 'bg-purple-100 text-purple-700' 
+                    : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {transcriptionMode === 'advanced' ? '🚀 AssemblyAI' : '⚡ Whisper'}
+                </div>
+                {transcriptionService?.isStreamingActive() && (
+                  <div className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    🔴 Streaming
+                  </div>
+                )}
+              </div>
+              
               {isRecording && (
                 <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                   {recordingStatus}
@@ -509,7 +616,8 @@ function App() {
                 </button>
               )}
               
-              {whisperInitialized && !isRecording && transcriptionMode === 'basic' && (
+              {/* Real-time transcription button for both modes */}
+              {((whisperInitialized && transcriptionMode === 'basic') || (transcriptionMode === 'advanced' && transcriptionService)) && !isRecording && (
                 <button
                   className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg ${
                     isRealtimeEnabled 
@@ -519,7 +627,7 @@ function App() {
                   onClick={toggleRealtimeTranscription}
                 >
                   <span className="mr-2">{isRealtimeEnabled ? '🔴' : '⚡'}</span>
-                  {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
+                  {isRealtimeEnabled ? 'Real-time ON' : `Enable Real-time ${transcriptionMode === 'advanced' ? '(Streaming)' : ''}`}
                 </button>
               )}
               
