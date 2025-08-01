@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from 'react-markdown';
+import { TranscriptionService } from './services/transcription';
 import "./App.css";
 
 function App() {
@@ -20,6 +21,10 @@ function App() {
   const [micGain, setMicGain] = useState(2.5);
   const [systemGain, setSystemGain] = useState(1.5);
   
+  // Transcription mode state
+  const [transcriptionMode, setTranscriptionMode] = useState<'basic' | 'advanced'>('basic');
+  const [transcriptionService, setTranscriptionService] = useState<TranscriptionService | null>(null);
+  
   // Audio device selection state
   interface AudioDevice {
     name: string;
@@ -35,6 +40,45 @@ function App() {
   const [availableDevices, setAvailableDevices] = useState<AudioDevices>({ input_devices: [], output_devices: [] });
   const [selectedMicDevice, setSelectedMicDevice] = useState<string | null>(null);
   const [selectedSystemDevice, setSelectedSystemDevice] = useState<string | null>(null);
+  
+  // Initialize transcription service and mode on component mount
+  useEffect(() => {
+    const initializeTranscription = async () => {
+      try {
+        // Get transcription mode from environment
+        const mode = import.meta.env.VITE_TRANSCRIPTION_MODE || 'basic';
+        const assemblyAIKey = import.meta.env.VITE_ASSEMBLYAI_API_KEY;
+        
+        setTranscriptionMode(mode as 'basic' | 'advanced');
+        
+        // Initialize transcription service
+        const service = new TranscriptionService({
+          mode: mode as 'basic' | 'advanced',
+          assemblyAIApiKey: assemblyAIKey,
+          enableSpeakerDiarization: import.meta.env.VITE_ASSEMBLYAI_SPEAKER_LABELS === 'true'
+        });
+        
+        setTranscriptionService(service);
+        
+        // Auto-initialize Whisper only for basic mode
+        if (mode === 'basic') {
+          console.log('Basic mode detected, auto-initializing Whisper...');
+          await initializeWhisper();
+        } else {
+          console.log('Advanced mode detected, using AssemblyAI - Whisper initialization skipped');
+          // For advanced mode, we don't need Whisper, so mark as "ready"
+          setWhisperInitialized(true);
+        }
+      } catch (error) {
+        console.error('Failed to initialize transcription:', error);
+        showError(`Failed to initialize transcription: ${error}`);
+      }
+    };
+    
+    // Delay initialization to ensure Tauri API is loaded
+    const timer = setTimeout(initializeTranscription, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let interval: number;
@@ -58,6 +102,8 @@ function App() {
     
     return () => clearTimeout(timer);
   }, []);
+
+
 
   // Listen for real-time transcription events
   useEffect(() => {
@@ -254,12 +300,18 @@ function App() {
       return;
     }
 
+    if (!transcriptionService) {
+      showError("Transcription service not initialized. Please wait for initialization to complete.");
+      return;
+    }
+
     try {
       clearError();
       setIsTranscribing(true);
       setTranscript("Processing audio file...");
       
-      const result = await invoke<string>("transcribe_audio", { audioPath: lastRecordingPath });
+      console.log(`Transcribing with ${transcriptionMode} mode...`);
+      const result = await transcriptionService.transcribeAudioFile(lastRecordingPath);
       console.log("Transcription result:", result);
       
       setTranscript(result);
@@ -447,7 +499,7 @@ function App() {
 
             {/* Controls */}
             <div className="flex flex-wrap justify-center gap-4">
-              {!whisperInitialized && (
+              {!whisperInitialized && transcriptionMode === 'basic' && (
                 <button 
                   className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
                   onClick={initializeWhisper}
@@ -457,7 +509,7 @@ function App() {
                 </button>
               )}
               
-              {whisperInitialized && !isRecording && (
+              {whisperInitialized && !isRecording && transcriptionMode === 'basic' && (
                 <button
                   className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg ${
                     isRealtimeEnabled 
@@ -483,14 +535,14 @@ function App() {
                 {isRecording ? 'Stop Recording' : 'Start Recording'}
               </button>
 
-              {lastRecordingPath && whisperInitialized && !isRecording && (
+              {lastRecordingPath && transcriptionService && !isRecording && (
                 <button 
                   className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                   onClick={transcribeAudio}
                   disabled={isTranscribing}
                 >
                   <span className="mr-2">{isTranscribing ? '⏳' : '📝'}</span>
-                  {isTranscribing ? 'Transcribing...' : 'Transcribe Audio'}
+                  {isTranscribing ? 'Transcribing...' : `Transcribe Audio (${transcriptionMode === 'basic' ? 'Whisper' : 'AssemblyAI'})`}
                 </button>
               )}
             </div>
@@ -643,6 +695,8 @@ function App() {
               </div>
               
               <div className="p-6 space-y-8">
+
+
                 {/* Real-time Transcription */}
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-gray-800">Real-time Transcription</h4>
