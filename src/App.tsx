@@ -360,6 +360,30 @@ function App() {
     clearError();
   };
 
+  const testMicrophoneAccess = async () => {
+    try {
+      clearError();
+      const result = await invoke<string>("test_microphone_access");
+      console.log("Microphone test result:", result);
+      showError(`✅ ${result}`);
+    } catch (error) {
+      console.error("Microphone test failed:", error);
+      showError(`❌ Microphone test failed: ${error}`);
+    }
+  };
+
+  const testAudioSystem = async () => {
+    try {
+      clearError();
+      const result = await invoke<string>("test_audio_system");
+      console.log("Audio system test result:", result);
+      showError(`🔊 ${result}`);
+    } catch (error) {
+      console.error("Audio system test failed:", error);
+      showError(`❌ Audio system test failed: ${error}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Header */}
@@ -753,7 +777,7 @@ function App() {
                     
                     <div className="space-y-2">
                       <label htmlFor="system-device" className="block text-sm font-medium text-gray-700">
-                        System Audio Device:
+                        System Audio Capture:
                       </label>
                       <select
                         id="system-device"
@@ -764,38 +788,64 @@ function App() {
                         }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                       >
-                        <option value="">Auto-detect</option>
+                        <option value="">🔍 Auto-detect (Recommended)</option>
+                        {/* Loopback devices (preferred for system audio) */}
                         {availableDevices.input_devices
                           .filter(device => device.device_type === 'system_audio')
                           .map((device, index) => (
-                            <option key={`input-${index}`} value={device.name}>
-                              {device.name} (Loopback)
+                            <option key={`loopback-${index}`} value={device.name}>
+                              🔄 {device.name} (Loopback Device)
                             </option>
                           ))}
+                        {/* Output devices (fallback) */}
                         {availableDevices.output_devices.map((device, index) => (
                           <option key={`output-${index}`} value={device.name}>
-                            {device.name}{device.is_default ? ' (Default)' : ''}
+                            🔊 {device.name}{device.is_default ? ' (Current Output)' : ''}
                           </option>
                         ))}
                       </select>
+                      <div className="text-xs text-gray-500 mt-1">
+                        💡 The system will capture audio from <strong>one</strong> source. Auto-detect finds the best available loopback device.
+                      </div>
                     </div>
                   </div>
                   
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h5 className="font-medium text-blue-900 mb-2">Current Selection:</h5>
+                    <h5 className="font-medium text-blue-900 mb-2">🎯 Active Audio Sources:</h5>
                     <div className="space-y-1 text-sm text-blue-800">
-                      <p>🎤 Microphone: <span className="font-medium">{selectedMicDevice || 'Default device'}</span></p>
-                      <p>🔊 System Audio: <span className="font-medium">{selectedSystemDevice || 'Auto-detect'}</span></p>
+                      <p>🎤 Microphone Input: <span className="font-medium">{selectedMicDevice || 'Default device'}</span></p>
+                      <p>🔊 System Audio Capture: <span className="font-medium">{selectedSystemDevice || 'Auto-detecting best source'}</span></p>
+                    </div>
+                    <div className="mt-2 text-xs text-blue-600">
+                      ℹ️ Both sources are mixed into a single recording
                     </div>
                   </div>
                   
-                  <button 
-                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                    onClick={loadAudioDevices}
-                  >
-                    <span className="mr-2">🔄</span>
-                    Refresh Devices
-                  </button>
+                  <div className="flex flex-wrap gap-3">
+                    <button 
+                      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      onClick={loadAudioDevices}
+                    >
+                      <span className="mr-2">🔄</span>
+                      Refresh Devices
+                    </button>
+                    
+                    <button 
+                      className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      onClick={testMicrophoneAccess}
+                    >
+                      <span className="mr-2">🧪</span>
+                      Test Microphone
+                    </button>
+                    
+                    <button 
+                      className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      onClick={testAudioSystem}
+                    >
+                      <span className="mr-2">🔊</span>
+                      Test Audio System
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -83,6 +83,7 @@ struct AudioDevices {
 async fn get_audio_devices() -> Result<AudioDevices, String> {
     use cpal::traits::{DeviceTrait, HostTrait};
     
+    println!("🎤 Starting audio device enumeration...");
     let host = cpal::default_host();
     let mut input_devices = Vec::new();
     let mut output_devices = Vec::new();
@@ -91,6 +92,22 @@ async fn get_audio_devices() -> Result<AudioDevices, String> {
     let default_input = host.default_input_device();
     let default_output = host.default_output_device();
     
+    if let Some(ref device) = default_input {
+        if let Ok(name) = device.name() {
+            println!("🎤 Default input device: {}", name);
+        }
+    } else {
+        println!("⚠️ No default input device found");
+    }
+    
+    if let Some(ref device) = default_output {
+        if let Ok(name) = device.name() {
+            println!("🔊 Default output device: {}", name);
+        }
+    } else {
+        println!("⚠️ No default output device found");
+    }
+    
     // Get input devices
     let inputs = host.input_devices()
         .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
@@ -98,6 +115,18 @@ async fn get_audio_devices() -> Result<AudioDevices, String> {
     for device in inputs {
         match device.name() {
             Ok(name) => {
+                println!("🎤 Found input device: {}", name);
+                
+                // Check if device supports input
+                match device.default_input_config() {
+                    Ok(config) => {
+                        println!("  ✅ Config: {:?}", config);
+                    }
+                    Err(e) => {
+                        println!("  ❌ Config error: {}", e);
+                    }
+                }
+                
                 let is_default = if let Some(ref default_device) = default_input {
                     if let Ok(default_name) = default_device.name() {
                         name == default_name
@@ -114,7 +143,8 @@ async fn get_audio_devices() -> Result<AudioDevices, String> {
                     device_type: "input".to_string(),
                 });
             }
-            Err(_) => {
+            Err(e) => {
+                println!("❌ Failed to get device name: {}", e);
                 input_devices.push(AudioDevice {
                     name: "Unknown Input Device".to_string(),
                     is_default: false,
@@ -581,13 +611,15 @@ fn start_audio_capture_with_realtime(
     };
     
     let mic_name = mic_device.name().unwrap_or_else(|_| "Unknown Microphone".to_string());
-    println!("Using microphone: {}", mic_name);
+    println!("🎤 Using microphone: {}", mic_name);
     
     // Get microphone configuration
     let mic_config = mic_device.default_input_config()
         .map_err(|e| format!("Failed to get microphone config: {}. Please check microphone permissions.", e))?;
     
-    println!("Microphone config: {:?}", mic_config);
+    println!("🎤 Microphone config: {:?}", mic_config);
+    println!("🎤 Sample rate: {} Hz, Channels: {}, Format: {:?}", 
+             mic_config.sample_rate().0, mic_config.channels(), mic_config.sample_format());
     
     let mic_sample_rate = mic_config.sample_rate().0;
     let mic_channels = mic_config.channels();
@@ -625,34 +657,53 @@ fn start_audio_capture_with_realtime(
             })
         })
     } else {
-        // Auto-detect system audio device (original logic)
-        let auto_device = host.output_devices()
-            .map_err(|e| format!("Failed to enumerate output devices: {}", e))?
-            .find(|device| {
-                if let Ok(name) = device.name() {
-                    // Look for system audio/loopback devices
-                    name.to_lowercase().contains("loopback") || 
-                    name.to_lowercase().contains("system") ||
-                    name.to_lowercase().contains("stereo mix") ||
-                    name.to_lowercase().contains("what u hear")
-                } else {
-                    false
-                }
-            });
+        // Auto-detect system audio device - PRIORITIZE BLACKHOLE/LOOPBACK DEVICES
+        println!("🔍 Auto-detecting system audio device...");
         
-        // If no dedicated loopback device, try to use default output as input (macOS specific)
-        auto_device.or_else(|| {
-            // On macOS, we might need to use a different approach
-            host.input_devices().ok()?.find(|device| {
+        // First priority: Look for dedicated loopback devices in INPUT devices
+        let loopback_device = host.input_devices().ok().and_then(|mut devices| {
+            devices.find(|device| {
                 if let Ok(name) = device.name() {
-                    name.to_lowercase().contains("soundflower") ||
-                    name.to_lowercase().contains("blackhole") ||
-                    name.to_lowercase().contains("loopback")
+                    let name_lower = name.to_lowercase();
+                    let is_loopback = name_lower.contains("blackhole") ||
+                                    name_lower.contains("soundflower") ||
+                                    name_lower.contains("loopback") ||
+                                    name_lower.contains("virtual");
+                    if is_loopback {
+                        println!("✅ Found dedicated loopback device: {}", name);
+                    }
+                    is_loopback
                 } else {
                     false
                 }
             })
-        })
+        });
+        
+        // Second priority: Look for system audio devices in OUTPUT devices
+        let system_device = loopback_device.or_else(|| {
+            host.output_devices().ok().and_then(|mut devices| {
+                devices.find(|device| {
+                    if let Ok(name) = device.name() {
+                        let name_lower = name.to_lowercase();
+                        let is_system = name_lower.contains("system") ||
+                                      name_lower.contains("stereo mix") ||
+                                      name_lower.contains("what u hear");
+                        if is_system {
+                            println!("⚠️ Using output device for system audio: {}", name);
+                        }
+                        is_system
+                    } else {
+                        false
+                    }
+                })
+            })
+        });
+        
+        if system_device.is_none() {
+            println!("❌ No dedicated system audio device found. Install BlackHole for better system audio capture.");
+        }
+        
+        system_device
     };
     
     // Shared buffers for audio data
@@ -677,6 +728,13 @@ fn start_audio_capture_with_realtime(
                             if let Ok(mut buffer) = mic_buffer_clone.lock() {
                                 // Convert to mono and resample if needed
                                 let mono_data = convert_to_mono(data, mic_channels);
+                                
+                                // Calculate audio level for debugging
+                                let max_level = mono_data.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+                                if max_level > 0.01 { // Only log if there's significant audio
+                                    println!("🎤 Mic audio level: {:.3} (samples: {})", max_level, mono_data.len());
+                                }
+                                
                                 let resampled = if mic_sample_rate != target_sample_rate {
                                     resample_audio(&mono_data, mic_sample_rate, target_sample_rate)
                                 } else {
@@ -1144,6 +1202,190 @@ async fn get_selected_devices(state: State<'_, AudioState>) -> Result<(Option<St
 }
 
 #[tauri::command]
+async fn test_microphone_access() -> Result<String, String> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    
+    println!("🧪 Testing microphone access...");
+    let host = cpal::default_host();
+    
+    // Try to get default input device
+    let device = host.default_input_device()
+        .ok_or_else(|| "No default input device found".to_string())?;
+    
+    let name = device.name().unwrap_or_else(|_| "Unknown Device".to_string());
+    println!("🎤 Testing device: {}", name);
+    
+    // Try to get configuration
+    let config = device.default_input_config()
+        .map_err(|e| format!("Failed to get device config (permission issue?): {}", e))?;
+    
+    println!("✅ Device config obtained: {:?}", config);
+    
+    // Try to build a test stream (this will trigger permission request if needed)
+    let test_stream = device.build_input_stream(
+        &config.into(),
+        move |_data: &[f32], _: &cpal::InputCallbackInfo| {
+            // Test callback - do nothing
+        },
+        move |err| {
+            println!("❌ Stream error: {}", err);
+        },
+        None,
+    ).map_err(|e| format!("Failed to build test stream: {}", e))?;
+    
+    println!("✅ Test stream created successfully");
+    
+    // Try to start the stream
+    test_stream.play().map_err(|e| format!("Failed to start test stream: {}", e))?;
+    
+    println!("✅ Test stream started successfully");
+    
+    // Let it run for a moment
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    
+    drop(test_stream);
+    println!("✅ Test stream stopped");
+    
+    Ok(format!("Microphone access test successful for device: {}", name))
+}
+
+#[tauri::command]
+async fn test_audio_system() -> Result<String, String> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    
+    println!("🧪 Testing complete audio system...");
+    let host = cpal::default_host();
+    let mut test_results = Vec::new();
+    
+    // Test 1: Microphone Access
+    println!("📋 Test 1: Microphone Access");
+    let mic_result = match host.default_input_device() {
+        Some(device) => {
+            let name = device.name().unwrap_or_else(|_| "Unknown Device".to_string());
+            match device.default_input_config() {
+                Ok(config) => {
+                    println!("✅ Microphone: {} - Config: {:?}", name, config);
+                    format!("✅ Microphone: {} ({}Hz, {} channels)", name, config.sample_rate().0, config.channels())
+                }
+                Err(e) => {
+                    let error = format!("❌ Microphone config error: {}", e);
+                    println!("{}", error);
+                    error
+                }
+            }
+        }
+        None => {
+            let error = "❌ No microphone device found".to_string();
+            println!("{}", error);
+            error
+        }
+    };
+    test_results.push(mic_result);
+    
+    // Test 2: System Audio Detection (BlackHole/Loopback)
+    println!("📋 Test 2: System Audio Detection");
+    let mut system_audio_found = false;
+    let mut system_result = String::new();
+    
+    // Check for loopback devices in input devices
+    if let Ok(input_devices) = host.input_devices() {
+        for device in input_devices {
+            if let Ok(name) = device.name() {
+                let name_lower = name.to_lowercase();
+                if name_lower.contains("blackhole") || name_lower.contains("soundflower") || 
+                   name_lower.contains("loopback") || name_lower.contains("virtual") {
+                    if let Ok(config) = device.default_input_config() {
+                        system_result = format!("✅ System Audio: {} ({}Hz, {} channels)", name, config.sample_rate().0, config.channels());
+                        println!("{}", system_result);
+                        system_audio_found = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    if !system_audio_found {
+        system_result = "⚠️ No dedicated system audio device (BlackHole) found. Install BlackHole for system audio capture.".to_string();
+        println!("{}", system_result);
+    }
+    test_results.push(system_result);
+    
+    // Test 3: Audio Stream Creation
+    println!("📋 Test 3: Audio Stream Creation");
+    let stream_result = if let Some(mic_device) = host.default_input_device() {
+        match mic_device.default_input_config() {
+            Ok(config) => {
+                match mic_device.build_input_stream(
+                    &config.into(),
+                    |_data: &[f32], _: &cpal::InputCallbackInfo| {},
+                    |err| println!("Stream error: {}", err),
+                    None,
+                ) {
+                    Ok(stream) => {
+                        match stream.play() {
+                            Ok(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                drop(stream);
+                                let result = "✅ Audio stream creation and playback successful".to_string();
+                                println!("{}", result);
+                                result
+                            }
+                            Err(e) => {
+                                let error = format!("❌ Stream playback failed: {}", e);
+                                println!("{}", error);
+                                error
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error = format!("❌ Stream creation failed: {}", e);
+                        println!("{}", error);
+                        error
+                    }
+                }
+            }
+            Err(e) => {
+                let error = format!("❌ Config error: {}", e);
+                println!("{}", error);
+                error
+            }
+        }
+    } else {
+        let error = "❌ No microphone for stream test".to_string();
+        println!("{}", error);
+        error
+    };
+    test_results.push(stream_result);
+    
+    // Test 4: Audio Permissions
+    println!("📋 Test 4: Audio Permissions");
+    let permission_result = if cfg!(target_os = "macos") {
+        "ℹ️ macOS: Audio permissions managed by system. If issues persist, check System Preferences > Security & Privacy > Microphone".to_string()
+    } else {
+        "ℹ️ Audio permissions vary by OS. Ensure microphone access is granted.".to_string()
+    };
+    println!("{}", permission_result);
+    test_results.push(permission_result);
+    
+    // Summary
+    let success_count = test_results.iter().filter(|r| r.starts_with("✅")).count();
+    let warning_count = test_results.iter().filter(|r| r.starts_with("⚠️")).count();
+    let error_count = test_results.iter().filter(|r| r.starts_with("❌")).count();
+    
+    let summary = format!(
+        "🎯 Audio System Test Complete\n\n{}\n\n📊 Summary: {} passed, {} warnings, {} errors",
+        test_results.join("\n"),
+        success_count,
+        warning_count,
+        error_count
+    );
+    
+    println!("\n{}", summary);
+    Ok(summary)
+}
+
+#[tauri::command]
 async fn set_gain_settings(state: State<'_, AudioState>, mic_gain: f32, system_gain: f32) -> Result<(), String> {
     // Validate gain values (prevent extremely high values that could cause distortion)
     if mic_gain < 0.0 || mic_gain > 10.0 {
@@ -1310,6 +1552,8 @@ pub fn run() {
             get_audio_devices,
             set_audio_devices,
             get_selected_devices,
+            test_microphone_access,
+            test_audio_system,
             initialize_whisper,
             transcribe_audio,
             enable_realtime_transcription,
