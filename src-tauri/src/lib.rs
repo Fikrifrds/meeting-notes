@@ -7,7 +7,7 @@ use std::thread;
 use std::sync::mpsc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 
 pub struct AudioState {
     is_recording: Arc<Mutex<bool>>,
@@ -25,6 +25,12 @@ pub struct AudioState {
     mixed_data: Arc<Mutex<Vec<f32>>>,
     target_sample_rate: u32,
     app_handle: Arc<Mutex<Option<AppHandle>>>,
+    // Audio gain settings
+    mic_gain: Arc<Mutex<f32>>,
+    system_gain: Arc<Mutex<f32>>,
+    // Device selection
+    selected_mic_device: Arc<Mutex<Option<String>>>,
+    selected_system_device: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for AudioState {
@@ -50,48 +56,133 @@ impl AudioState {
             mixed_data: Arc::new(Mutex::new(Vec::new())),
             target_sample_rate: 16000,
             app_handle: Arc::new(Mutex::new(None)),
+            // Initialize gain settings with improved default values
+            mic_gain: Arc::new(Mutex::new(2.5)),
+            system_gain: Arc::new(Mutex::new(1.5)),
+            // Device selection
+            selected_mic_device: Arc::new(Mutex::new(None)),
+            selected_system_device: Arc::new(Mutex::new(None)),
         }
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct AudioDevice {
+    name: String,
+    is_default: bool,
+    device_type: String, // "input" or "output"
+}
+
+#[derive(Serialize, Deserialize)]
+struct AudioDevices {
+    input_devices: Vec<AudioDevice>,
+    output_devices: Vec<AudioDevice>,
+}
+
 #[tauri::command]
-async fn get_audio_devices() -> Result<Vec<String>, String> {
+async fn get_audio_devices() -> Result<AudioDevices, String> {
     use cpal::traits::{DeviceTrait, HostTrait};
     
     let host = cpal::default_host();
-    let mut devices = Vec::new();
+    let mut input_devices = Vec::new();
+    let mut output_devices = Vec::new();
+    
+    // Get default devices for comparison
+    let default_input = host.default_input_device();
+    let default_output = host.default_output_device();
     
     // Get input devices
-    let input_devices = host.input_devices()
+    let inputs = host.input_devices()
         .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
     
-    for device in input_devices {
+    for device in inputs {
         match device.name() {
             Ok(name) => {
-                // Check if this is the default device
-                if let Some(default_device) = host.default_input_device() {
+                let is_default = if let Some(ref default_device) = default_input {
                     if let Ok(default_name) = default_device.name() {
-                        if name == default_name {
-                            devices.push(format!("{} (Default)", name));
-                        } else {
-                            devices.push(name);
-                        }
+                        name == default_name
                     } else {
-                        devices.push(name);
+                        false
                     }
                 } else {
-                    devices.push(name);
-                }
+                    false
+                };
+                
+                input_devices.push(AudioDevice {
+                    name,
+                    is_default,
+                    device_type: "input".to_string(),
+                });
             }
-            Err(_) => devices.push("Unknown Device".to_string()),
+            Err(_) => {
+                input_devices.push(AudioDevice {
+                    name: "Unknown Input Device".to_string(),
+                    is_default: false,
+                    device_type: "input".to_string(),
+                });
+            }
         }
     }
     
-    if devices.is_empty() {
+    // Get output devices (for system audio capture)
+    let outputs = host.output_devices()
+        .map_err(|e| format!("Failed to enumerate output devices: {}", e))?;
+    
+    for device in outputs {
+        match device.name() {
+            Ok(name) => {
+                let is_default = if let Some(ref default_device) = default_output {
+                    if let Ok(default_name) = default_device.name() {
+                        name == default_name
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                
+                // Check if this device supports input (for loopback)
+                if device.default_input_config().is_ok() {
+                    output_devices.push(AudioDevice {
+                        name: format!("{} (System Audio)", name),
+                        is_default,
+                        device_type: "output".to_string(),
+                    });
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    
+    // Also check for dedicated loopback devices in input devices
+    let loopback_inputs = host.input_devices()
+        .map_err(|e| format!("Failed to enumerate input devices for loopback: {}", e))?;
+    
+    for device in loopback_inputs {
+        if let Ok(name) = device.name() {
+            let name_lower = name.to_lowercase();
+            if name_lower.contains("loopback") || 
+               name_lower.contains("stereo mix") ||
+               name_lower.contains("what u hear") ||
+               name_lower.contains("soundflower") ||
+               name_lower.contains("blackhole") {
+                output_devices.push(AudioDevice {
+                    name: format!("{} (Loopback)", name),
+                    is_default: false,
+                    device_type: "loopback".to_string(),
+                });
+            }
+        }
+    }
+    
+    if input_devices.is_empty() {
         return Err("No audio input devices found. Please check your microphone connection.".to_string());
     }
     
-    Ok(devices)
+    Ok(AudioDevices {
+        input_devices,
+        output_devices,
+    })
 }
 
 #[tauri::command]
@@ -425,6 +516,11 @@ async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) ->
     let app_handle_clone = state.app_handle.clone();
     let chunk_size = state.chunk_size;
     
+    let mic_gain_clone = state.mic_gain.clone();
+    let system_gain_clone = state.system_gain.clone();
+    let selected_mic_clone = state.selected_mic_device.clone();
+    let selected_system_clone = state.selected_system_device.clone();
+    
     thread::spawn(move || {
         if let Err(e) = start_audio_capture_with_realtime(
             recording_data_clone, 
@@ -432,7 +528,11 @@ async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) ->
             whisper_context_clone,
             is_realtime_clone,
             app_handle_clone,
-            chunk_size
+            chunk_size,
+            mic_gain_clone,
+            system_gain_clone,
+            selected_mic_clone,
+            selected_system_clone,
         ) {
             eprintln!("Audio capture error: {}", e);
         }
@@ -448,15 +548,37 @@ fn start_audio_capture_with_realtime(
     is_realtime_enabled: Arc<Mutex<bool>>,
     app_handle: Arc<Mutex<Option<AppHandle>>>,
     chunk_size: usize,
+    mic_gain: Arc<Mutex<f32>>,
+    system_gain: Arc<Mutex<f32>>,
+    selected_mic_device: Arc<Mutex<Option<String>>>,
+    selected_system_device: Arc<Mutex<Option<String>>>,
 ) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     
     let host = cpal::default_host();
     let target_sample_rate = 16000u32; // Whisper's preferred sample rate
     
-    // Get microphone device
-    let mic_device = host.default_input_device()
-        .ok_or_else(|| "No microphone device available. Please check your microphone connection.".to_string())?;
+    // Get microphone device (use selected device or default)
+    let selected_mic_name = selected_mic_device.lock().map_err(|e| e.to_string())?.clone();
+    let mic_device = if let Some(ref device_name) = selected_mic_name {
+        // Find the device by name
+        host.input_devices()
+            .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
+            .find(|device| {
+                if let Ok(name) = device.name() {
+                    // Remove "(Default)" suffix if present for comparison
+                    let clean_name = name.replace(" (Default)", "");
+                    let clean_selected = device_name.replace(" (Default)", "");
+                    clean_name == clean_selected
+                } else {
+                    false
+                }
+            })
+            .ok_or_else(|| format!("Selected microphone device '{}' not found", device_name))?
+    } else {
+        host.default_input_device()
+            .ok_or_else(|| "No microphone device available. Please check your microphone connection.".to_string())?
+    };
     
     let mic_name = mic_device.name().unwrap_or_else(|_| "Unknown Microphone".to_string());
     println!("Using microphone: {}", mic_name);
@@ -470,34 +592,68 @@ fn start_audio_capture_with_realtime(
     let mic_sample_rate = mic_config.sample_rate().0;
     let mic_channels = mic_config.channels();
     
-    // Try to get system audio device (loopback)
-    let system_device = host.output_devices()
-        .map_err(|e| format!("Failed to enumerate output devices: {}", e))?
-        .find(|device| {
-            if let Ok(name) = device.name() {
-                // Look for system audio/loopback devices
-                name.to_lowercase().contains("loopback") || 
-                name.to_lowercase().contains("system") ||
-                name.to_lowercase().contains("stereo mix") ||
-                name.to_lowercase().contains("what u hear")
-            } else {
-                false
-            }
-        });
-    
-    // If no dedicated loopback device, try to use default output as input (macOS specific)
-    let system_device = system_device.or_else(|| {
-        // On macOS, we might need to use a different approach
-        host.input_devices().ok()?.find(|device| {
-            if let Ok(name) = device.name() {
-                name.to_lowercase().contains("soundflower") ||
-                name.to_lowercase().contains("blackhole") ||
-                name.to_lowercase().contains("loopback")
-            } else {
-                false
-            }
+    // Get system audio device (use selected device or auto-detect)
+    let selected_system_name = selected_system_device.lock().map_err(|e| e.to_string())?.clone();
+    let system_device = if let Some(ref device_name) = selected_system_name {
+        // Find the selected system device
+        let clean_selected = device_name
+            .replace(" (System Audio)", "")
+            .replace(" (Loopback)", "")
+            .replace(" (Default)", "");
+        
+        // First try output devices
+        let output_device = host.output_devices()
+            .map_err(|e| format!("Failed to enumerate output devices: {}", e))?
+            .find(|device| {
+                if let Ok(name) = device.name() {
+                    let clean_name = name.replace(" (Default)", "");
+                    clean_name == clean_selected
+                } else {
+                    false
+                }
+            });
+        
+        // If not found in outputs, try input devices (for loopback devices)
+        output_device.or_else(|| {
+            host.input_devices().ok()?.find(|device| {
+                if let Ok(name) = device.name() {
+                    let clean_name = name.replace(" (Default)", "");
+                    clean_name == clean_selected
+                } else {
+                    false
+                }
+            })
         })
-    });
+    } else {
+        // Auto-detect system audio device (original logic)
+        let auto_device = host.output_devices()
+            .map_err(|e| format!("Failed to enumerate output devices: {}", e))?
+            .find(|device| {
+                if let Ok(name) = device.name() {
+                    // Look for system audio/loopback devices
+                    name.to_lowercase().contains("loopback") || 
+                    name.to_lowercase().contains("system") ||
+                    name.to_lowercase().contains("stereo mix") ||
+                    name.to_lowercase().contains("what u hear")
+                } else {
+                    false
+                }
+            });
+        
+        // If no dedicated loopback device, try to use default output as input (macOS specific)
+        auto_device.or_else(|| {
+            // On macOS, we might need to use a different approach
+            host.input_devices().ok()?.find(|device| {
+                if let Ok(name) = device.name() {
+                    name.to_lowercase().contains("soundflower") ||
+                    name.to_lowercase().contains("blackhole") ||
+                    name.to_lowercase().contains("loopback")
+                } else {
+                    false
+                }
+            })
+        })
+    };
     
     // Shared buffers for audio data
     let mic_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
@@ -645,6 +801,8 @@ fn start_audio_capture_with_realtime(
     let is_recording_mixer = is_recording.clone();
     let mic_buffer_mixer = mic_buffer.clone();
     let system_buffer_mixer = system_buffer.clone();
+    let mic_gain_mixer = mic_gain.clone();
+    let system_gain_mixer = system_gain.clone();
     
     thread::spawn(move || {
         let mut last_mic_len = 0;
@@ -685,8 +843,18 @@ fn start_audio_capture_with_realtime(
             
             // Mix audio streams if we have new data
             if !mic_data.is_empty() || !system_data.is_empty() {
-                // Mix with higher gains for better volume (increased from 0.7/0.5 to 1.2/0.8)
-                let mixed = mix_audio_streams(&mic_data, &system_data, 1.2, 0.8);
+                // Get current gain settings
+                let mic_gain_val = mic_gain_mixer.lock().map(|g| *g).unwrap_or_else(|_| {
+                    eprintln!("Failed to lock mic gain, using default");
+                    2.5
+                });
+                let system_gain_val = system_gain_mixer.lock().map(|g| *g).unwrap_or_else(|_| {
+                    eprintln!("Failed to lock system gain, using default");
+                    1.5
+                });
+                
+                // Mix with configurable gains for better volume control
+                let mixed = mix_audio_streams(&mic_data, &system_data, mic_gain_val, system_gain_val);
                 
                 // Add to main recording buffer
                 if let Ok(mut recording) = recording_data_clone.lock() {
@@ -790,7 +958,11 @@ fn start_audio_capture(
         Arc::new(Mutex::new(None)),
         Arc::new(Mutex::new(false)),
         Arc::new(Mutex::new(None)),
-        0
+        0,
+        Arc::new(Mutex::new(2.5)), // Default mic gain
+        Arc::new(Mutex::new(1.5)), // Default system gain
+        Arc::new(Mutex::new(None)), // No selected mic device
+        Arc::new(Mutex::new(None))  // No selected system device
     )
 }
 
@@ -939,6 +1111,59 @@ struct OpenAIResponse {
 }
 
 #[tauri::command]
+async fn get_gain_settings(state: State<'_, AudioState>) -> Result<(f32, f32), String> {
+    let mic_gain = state.mic_gain.lock().map_err(|e| e.to_string())?;
+    let system_gain = state.system_gain.lock().map_err(|e| e.to_string())?;
+    Ok((*mic_gain, *system_gain))
+}
+
+#[tauri::command]
+async fn set_audio_devices(
+    state: State<'_, AudioState>, 
+    mic_device: Option<String>, 
+    system_device: Option<String>
+) -> Result<String, String> {
+    if let Some(mic) = mic_device {
+        let mut selected_mic = state.selected_mic_device.lock().map_err(|e| e.to_string())?;
+        *selected_mic = Some(mic);
+    }
+    
+    if let Some(system) = system_device {
+        let mut selected_system = state.selected_system_device.lock().map_err(|e| e.to_string())?;
+        *selected_system = Some(system);
+    }
+    
+    Ok("Audio devices updated successfully".to_string())
+}
+
+#[tauri::command]
+async fn get_selected_devices(state: State<'_, AudioState>) -> Result<(Option<String>, Option<String>), String> {
+    let mic_device = state.selected_mic_device.lock().map_err(|e| e.to_string())?;
+    let system_device = state.selected_system_device.lock().map_err(|e| e.to_string())?;
+    Ok((mic_device.clone(), system_device.clone()))
+}
+
+#[tauri::command]
+async fn set_gain_settings(state: State<'_, AudioState>, mic_gain: f32, system_gain: f32) -> Result<(), String> {
+    // Validate gain values (prevent extremely high values that could cause distortion)
+    if mic_gain < 0.0 || mic_gain > 10.0 {
+        return Err("Microphone gain must be between 0.0 and 10.0".to_string());
+    }
+    if system_gain < 0.0 || system_gain > 10.0 {
+        return Err("System gain must be between 0.0 and 10.0".to_string());
+    }
+    
+    let mut mic_gain_guard = state.mic_gain.lock().map_err(|e| e.to_string())?;
+    let mut system_gain_guard = state.system_gain.lock().map_err(|e| e.to_string())?;
+    
+    *mic_gain_guard = mic_gain;
+    *system_gain_guard = system_gain;
+    
+    println!("Updated gain settings - Mic: {}, System: {}", mic_gain, system_gain);
+    Ok(())
+}
+
+#[tauri::command]
 async fn generate_meeting_minutes(transcript: String) -> Result<String, String> {
     // Load environment variables
     dotenv::dotenv().ok();
@@ -1083,6 +1308,8 @@ pub fn run() {
             save_files,
             save_transcript_to_file,
             get_audio_devices,
+            set_audio_devices,
+            get_selected_devices,
             initialize_whisper,
             transcribe_audio,
             enable_realtime_transcription,
@@ -1090,6 +1317,8 @@ pub fn run() {
             get_recording_status,
             generate_meeting_minutes,
             save_meeting_minutes,
+            get_gain_settings,
+            set_gain_settings,
             greet
         ])
         .run(tauri::generate_context!())

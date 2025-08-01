@@ -14,10 +14,27 @@ function App() {
   const [recordingStatus, setRecordingStatus] = useState("Not recording");
   const [realtimeTranscript, setRealtimeTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [audioDevices, setAudioDevices] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [meetingMinutes, setMeetingMinutes] = useState("");
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
+  const [micGain, setMicGain] = useState(2.5);
+  const [systemGain, setSystemGain] = useState(1.5);
+  
+  // Audio device selection state
+  interface AudioDevice {
+    name: string;
+    is_default: boolean;
+    device_type: string;
+  }
+  
+  interface AudioDevices {
+    input_devices: AudioDevice[];
+    output_devices: AudioDevice[];
+  }
+  
+  const [availableDevices, setAvailableDevices] = useState<AudioDevices>({ input_devices: [], output_devices: [] });
+  const [selectedMicDevice, setSelectedMicDevice] = useState<string | null>(null);
+  const [selectedSystemDevice, setSelectedSystemDevice] = useState<string | null>(null);
 
   useEffect(() => {
     let interval: number;
@@ -31,11 +48,12 @@ function App() {
     return () => clearInterval(interval);
   }, [isRecording]);
 
-  // Load audio devices on component mount
+  // Load audio devices and gain settings on component mount
   useEffect(() => {
     // Delay to ensure Tauri API is fully loaded
     const timer = setTimeout(() => {
       loadAudioDevices();
+      loadGainSettings();
     }, 1000);
     
     return () => clearTimeout(timer);
@@ -90,11 +108,61 @@ function App() {
         return;
       }
       
-      const devices = await invoke<string[]>("get_audio_devices");
-      setAudioDevices(devices);
+      const devices = await invoke<AudioDevices>("get_audio_devices");
+      setAvailableDevices(devices);
+      
+      // Load currently selected devices
+      await loadSelectedDevices();
     } catch (error) {
       console.error("Failed to load audio devices:", error);
       showError(`Failed to load audio devices: ${error}`);
+    }
+  };
+
+  const loadSelectedDevices = async () => {
+    try {
+      const [micDevice, systemDevice] = await invoke<[string | null, string | null]>("get_selected_devices");
+      setSelectedMicDevice(micDevice);
+      setSelectedSystemDevice(systemDevice);
+    } catch (error) {
+      console.error("Failed to load selected devices:", error);
+    }
+  };
+
+  const updateSelectedDevices = async (micDevice: string | null, systemDevice: string | null) => {
+    try {
+      await invoke("set_audio_devices", { 
+        micDevice: micDevice, 
+        systemDevice: systemDevice 
+      });
+      setSelectedMicDevice(micDevice);
+      setSelectedSystemDevice(systemDevice);
+      console.log(`Audio devices updated - Mic: ${micDevice || 'Default'}, System: ${systemDevice || 'Auto-detect'}`);
+    } catch (error) {
+      console.error("Failed to set audio devices:", error);
+      showError(`Failed to set audio devices: ${error}`);
+    }
+  };
+
+  const loadGainSettings = async () => {
+    try {
+      const [mic, system] = await invoke<[number, number]>("get_gain_settings");
+      setMicGain(mic);
+      setSystemGain(system);
+    } catch (error) {
+      console.error("Failed to load gain settings:", error);
+    }
+  };
+
+  const updateGainSettings = async (newMicGain: number, newSystemGain: number) => {
+    try {
+      await invoke("set_gain_settings", { micGain: newMicGain, systemGain: newSystemGain });
+      setMicGain(newMicGain);
+      setSystemGain(newSystemGain);
+      console.log(`Gain updated - Mic: ${newMicGain}, System: ${newSystemGain}`);
+    } catch (error) {
+      console.error("Failed to update gain settings:", error);
+      showError(`Failed to update gain settings: ${error}`);
     }
   };
 
@@ -205,15 +273,7 @@ function App() {
     }
   };
 
-  const handleClear = () => {
-    setRecordingTime(0);
-    setTranscript("");
-    setRealtimeTranscript("");
-    setMeetingMinutes("");
-    setLastRecordingPath("");
-    setRecordingStatus("Not recording");
-    clearError();
-  };
+
 
   const handleSave = async () => {
     try {
@@ -301,167 +361,450 @@ function App() {
   };
 
   return (
-    <div className="container">
-      <header className="header">
-        <h1>Meeting Recorder</h1>
-        <div className="status">
-          <span className={`status-indicator ${isRecording ? 'recording' : 'idle'}`}></span>
-          <span>{isRecording ? 'Recording' : 'Ready'}</span>
-          {isRecording && (
-            <span className="recording-details">
-              • {recordingStatus}
-              {isRealtimeEnabled && " • Real-time ON"}
-            </span>
-          )}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                <span className="text-white text-xl">🎙️</span>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Meeting Recorder</h1>
+                <p className="text-sm text-gray-500">Professional audio transcription</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
+                <span className="text-sm font-medium text-gray-700">
+                  {isRecording ? 'Recording' : 'Ready'}
+                </span>
+              </div>
+              {isRecording && (
+                <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                  {recordingStatus}
+                  {isRealtimeEnabled && " • Real-time ON"}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
+      {/* Error Banner */}
       {error && (
-        <div className="error-banner">
-          <span className="error-message">{error}</span>
-          <button className="error-close" onClick={clearError}>×</button>
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 mx-4 mt-4 rounded-r-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            </div>
+            <button 
+              onClick={clearError}
+              className="text-red-400 hover:text-red-600 transition-colors"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
-      <main className="main">
-        <div className="recording-section">
-          <div className="timer">
-            <h2>{formatTime(recordingTime)}</h2>
-          </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Recording Section */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
+          <div className="text-center">
+            {/* Timer */}
+            <div className="mb-8">
+              <div className="text-6xl font-mono font-bold text-gray-900 mb-2">
+                {formatTime(recordingTime)}
+              </div>
+              <p className="text-gray-500">Recording Duration</p>
+            </div>
 
-          <div className="audio-indicator">
-            <div className={`audio-circle ${isRecording ? 'recording' : ''}`}></div>
-          </div>
-
-          <div className="controls">
-            {!whisperInitialized && (
-              <button className="btn btn-primary" onClick={initializeWhisper}>
-                Initialize Whisper
-              </button>
-            )}
-            
-            {whisperInitialized && !isRecording && (
-              <button
-                className={`btn ${isRealtimeEnabled ? 'btn-success' : 'btn-secondary'}`}
-                onClick={toggleRealtimeTranscription}
-              >
-                {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
-              </button>
-            )}
-            
-            <button
-              className={`btn ${isRecording ? 'btn-danger' : 'btn-primary'}`}
-              onClick={isRecording ? stopRecording : startRecording}
-            >
-              {isRecording ? 'Stop Recording' : 'Start Recording'}
-            </button>
-
-            {lastRecordingPath && whisperInitialized && !isRecording && (
-              <button 
-                className="btn btn-secondary" 
-                onClick={transcribeAudio}
-                disabled={isTranscribing}
-              >
-                {isTranscribing ? 'Transcribing...' : 'Transcribe Audio'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="transcript-section">
-          {isRealtimeEnabled && isRecording && realtimeTranscript && (
-            <div className="realtime-transcript">
-              <h3>
-                <span className="live-indicator"></span>
-                Real-time (Live)
-              </h3>
-              <div className="transcript-area realtime">
-                {realtimeTranscript}
+            {/* Audio Indicator */}
+            <div className="flex justify-center mb-8">
+              <div className={`w-24 h-24 rounded-full border-4 flex items-center justify-center transition-all duration-300 ${
+                isRecording 
+                  ? 'border-red-500 bg-red-50 animate-pulse' 
+                  : 'border-gray-300 bg-gray-50'
+              }`}>
+                <div className={`w-12 h-12 rounded-full transition-all duration-300 ${
+                  isRecording ? 'bg-red-500' : 'bg-gray-400'
+                }`}></div>
               </div>
             </div>
-          )}
-          
-          <div className="final-transcript">
-            {(isRealtimeEnabled && isRecording) && <h3>Final Transcript</h3>}
-            <div className="transcript-area">
-              {transcript || "Transcript will appear here after recording and transcription..."}
+
+            {/* Controls */}
+            <div className="flex flex-wrap justify-center gap-4">
+              {!whisperInitialized && (
+                <button 
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+                  onClick={initializeWhisper}
+                >
+                  <span className="mr-2">⚡</span>
+                  Initialize Whisper
+                </button>
+              )}
+              
+              {whisperInitialized && !isRecording && (
+                <button
+                  className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg ${
+                    isRealtimeEnabled 
+                      ? 'bg-green-500 hover:bg-green-600 text-white' 
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                  }`}
+                  onClick={toggleRealtimeTranscription}
+                >
+                  <span className="mr-2">{isRealtimeEnabled ? '🔴' : '⚡'}</span>
+                  {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
+                </button>
+              )}
+              
+              <button
+                className={`px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 shadow-lg ${
+                  isRecording 
+                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+                onClick={isRecording ? stopRecording : startRecording}
+              >
+                <span className="mr-2">{isRecording ? '⏹️' : '▶️'}</span>
+                {isRecording ? 'Stop Recording' : 'Start Recording'}
+              </button>
+
+              {lastRecordingPath && whisperInitialized && !isRecording && (
+                <button 
+                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  onClick={transcribeAudio}
+                  disabled={isTranscribing}
+                >
+                  <span className="mr-2">{isTranscribing ? '⏳' : '📝'}</span>
+                  {isTranscribing ? 'Transcribing...' : 'Transcribe Audio'}
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="meeting-minutes-section">
-          <div className="section-header">
-            <h3>🤖 AI Meeting Minutes</h3>
+        {/* Transcript Section */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
+          <div className="flex items-center mb-6">
+            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+              <span className="text-blue-600">📝</span>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900">Transcript</h2>
+          </div>
+          
+          <div className="space-y-6">
+            {isRealtimeEnabled && isRecording && realtimeTranscript && (
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6">
+                <div className="flex items-center mb-4">
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse mr-2"></div>
+                  <h3 className="text-lg font-semibold text-green-800">Real-time (Live)</h3>
+                </div>
+                <div className="bg-white rounded-lg p-4 border border-green-200 min-h-[120px] max-h-[300px] overflow-y-auto">
+                  <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
+                    {realtimeTranscript}
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            <div>
+              {(isRealtimeEnabled && isRecording) && (
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Final Transcript</h3>
+              )}
+              {!transcript ? (
+                <div className="bg-gray-50 rounded-xl p-12 text-center">
+                  <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span className="text-2xl text-gray-400">🎙️</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-600 mb-2">No transcript available yet</h3>
+                  <p className="text-gray-500">Start recording to see live transcription</p>
+                </div>
+              ) : (
+                <div className="bg-gray-50 rounded-xl p-6 min-h-[200px] max-h-[400px] overflow-y-auto">
+                  <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
+                    {transcript}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Meeting Minutes Section */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center">
+              <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                <span className="text-purple-600">🤖</span>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900">AI Meeting Minutes</h3>
+            </div>
             {transcript && !isRecording && (
               <button 
-                className="btn btn-ai" 
+                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 onClick={generateMeetingMinutes}
                 disabled={isGeneratingMinutes}
               >
-                {isGeneratingMinutes ? 'Generating...' : '✨ Generate Minutes'}
+                <span className="mr-2">✨</span>
+                {isGeneratingMinutes ? 'Generating...' : 'Generate Minutes'}
               </button>
             )}
           </div>
-          <div className="meeting-minutes-area">
+          
+          <div className="bg-gray-50 rounded-xl p-6 min-h-[200px] max-h-[500px] overflow-y-auto">
             {meetingMinutes ? (
-              <ReactMarkdown>{meetingMinutes}</ReactMarkdown>
+              <div className="prose prose-gray max-w-none">
+                <ReactMarkdown>{meetingMinutes}</ReactMarkdown>
+              </div>
             ) : (
-              "AI-generated meeting minutes will appear here after generating..."
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl text-gray-400">🤖</span>
+                </div>
+                <p className="text-gray-500">AI-generated meeting minutes will appear here after generating...</p>
+              </div>
             )}
           </div>
+          
           {meetingMinutes && (
-            <div className="minutes-actions">
+            <div className="mt-6 flex justify-end">
               <button 
-                className="action-btn primary" 
+                className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
                 onClick={saveMeetingMinutes}
               >
-                💾 Save Minutes
+                <span className="mr-2">💾</span>
+                Save Minutes
               </button>
             </div>
           )}
         </div>
 
-        <div className="actions">
-          <button className="action-btn" onClick={handleClearAll}>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap justify-center gap-4 mb-8">
+          <button 
+            className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+            onClick={handleClearAll}
+          >
+            <span className="mr-2">🗑️</span>
             Clear All
           </button>
-          <button className="action-btn" onClick={toggleSettings}>
+          <button 
+            className="bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+            onClick={toggleSettings}
+          >
+            <span className="mr-2">⚙️</span>
             Settings
           </button>
           <button 
-            className="action-btn primary" 
+            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             onClick={handleSave}
             disabled={!transcript}
           >
+            <span className="mr-2">💾</span>
             Save Files
           </button>
         </div>
 
+        {/* Settings Panel */}
         {showSettings && (
-          <div className="settings-panel">
-            <h3>Settings</h3>
-            <div className="setting-group">
-              <label>Available Audio Devices:</label>
-              <div className="device-list">
-                {audioDevices.length > 0 ? (
-                  audioDevices.map((device, index) => (
-                    <div key={index} className="device-item">
-                      {device}
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center mr-3">
+                      <span className="text-slate-600">⚙️</span>
                     </div>
-                  ))
-                ) : (
-                  <div className="device-item">No devices found</div>
-                )}
+                    <h3 className="text-xl font-bold text-gray-900">Settings</h3>
+                  </div>
+                  <button 
+                    className="text-gray-400 hover:text-gray-600 transition-colors p-2"
+                    onClick={() => setShowSettings(false)}
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <button className="btn btn-secondary" onClick={loadAudioDevices}>
-                Refresh Devices
-              </button>
+              
+              <div className="p-6 space-y-8">
+                {/* Real-time Transcription */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-gray-800">Real-time Transcription</h4>
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isRealtimeEnabled}
+                      onChange={toggleRealtimeTranscription}
+                      disabled={isRecording}
+                      className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                    <span className="text-gray-700 font-medium">⚡ Enable Real-time Transcription</span>
+                  </label>
+                </div>
+
+                {/* Audio Gain Settings */}
+                <div className="space-y-6">
+                  <h4 className="text-lg font-semibold text-gray-800">🎚️ Audio Gain Settings</h4>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label htmlFor="mic-gain" className="block text-sm font-medium text-gray-700">
+                        🎤 Microphone Gain: <span className="text-blue-600 font-semibold">{micGain.toFixed(1)}</span>
+                      </label>
+                      <input
+                        id="mic-gain"
+                        type="range"
+                        min="0.1"
+                        max="5.0"
+                        step="0.1"
+                        value={micGain}
+                        onChange={(e) => {
+                          const newValue = parseFloat(e.target.value);
+                          updateGainSettings(newValue, systemGain);
+                        }}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label htmlFor="system-gain" className="block text-sm font-medium text-gray-700">
+                        🔊 System Audio Gain: <span className="text-blue-600 font-semibold">{systemGain.toFixed(1)}</span>
+                      </label>
+                      <input
+                        id="system-gain"
+                        type="range"
+                        min="0.1"
+                        max="5.0"
+                        step="0.1"
+                        value={systemGain}
+                        onChange={(e) => {
+                          const newValue = parseFloat(e.target.value);
+                          updateGainSettings(micGain, newValue);
+                        }}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      <button 
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        onClick={() => updateGainSettings(1.0, 1.0)}
+                      >
+                        Normal (1.0/1.0)
+                      </button>
+                      <button 
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        onClick={() => updateGainSettings(2.0, 1.5)}
+                      >
+                        Boost (2.0/1.5)
+                      </button>
+                      <button 
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        onClick={() => updateGainSettings(3.0, 2.0)}
+                      >
+                        High (3.0/2.0)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Audio Device Selection */}
+                <div className="space-y-6">
+                  <h4 className="text-lg font-semibold text-gray-800">🎤 Audio Device Selection</h4>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label htmlFor="mic-device" className="block text-sm font-medium text-gray-700">
+                        Microphone Device:
+                      </label>
+                      <select
+                        id="mic-device"
+                        value={selectedMicDevice || ''}
+                        onChange={(e) => {
+                          const value = e.target.value || null;
+                          updateSelectedDevices(value, selectedSystemDevice);
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="">Use Default</option>
+                        {availableDevices.input_devices.map((device, index) => (
+                          <option key={index} value={device.name}>
+                            {device.name}{device.is_default ? ' (Default)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label htmlFor="system-device" className="block text-sm font-medium text-gray-700">
+                        System Audio Device:
+                      </label>
+                      <select
+                        id="system-device"
+                        value={selectedSystemDevice || ''}
+                        onChange={(e) => {
+                          const value = e.target.value || null;
+                          updateSelectedDevices(selectedMicDevice, value);
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                      >
+                        <option value="">Auto-detect</option>
+                        {availableDevices.input_devices
+                          .filter(device => device.device_type === 'system_audio')
+                          .map((device, index) => (
+                            <option key={`input-${index}`} value={device.name}>
+                              {device.name} (Loopback)
+                            </option>
+                          ))}
+                        {availableDevices.output_devices.map((device, index) => (
+                          <option key={`output-${index}`} value={device.name}>
+                            {device.name}{device.is_default ? ' (Default)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h5 className="font-medium text-blue-900 mb-2">Current Selection:</h5>
+                    <div className="space-y-1 text-sm text-blue-800">
+                      <p>🎤 Microphone: <span className="font-medium">{selectedMicDevice || 'Default device'}</span></p>
+                      <p>🔊 System Audio: <span className="font-medium">{selectedSystemDevice || 'Auto-detect'}</span></p>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                    onClick={loadAudioDevices}
+                  >
+                    <span className="mr-2">🔄</span>
+                    Refresh Devices
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="footer">
-          Files saved to: Documents/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*
+        {/* Footer */}
+        <div className="text-center py-6 text-gray-500 text-sm bg-white rounded-2xl shadow-lg border border-gray-200">
+          <p>📁 Files saved to: <span className="font-mono">Documents/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*</span></p>
         </div>
     </main>
       </div>
