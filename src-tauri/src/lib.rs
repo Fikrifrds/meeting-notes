@@ -1395,31 +1395,12 @@ async fn transcribe_with_assemblyai(
         
         match status {
             "completed" => {
-                if enable_speaker_diarization {
-                    // Handle speaker diarization output
-                    if let Some(utterances) = poll_result.get("utterances").and_then(|v| v.as_array()) {
-                        let mut formatted_transcript = String::new();
-                        for utterance in utterances {
-                            if let (Some(speaker), Some(text)) = (
-                                utterance.get("speaker").and_then(|v| v.as_str()),
-                                utterance.get("text").and_then(|v| v.as_str())
-                            ) {
-                                formatted_transcript.push_str(&format!("Speaker {}: {}\n", speaker, text));
-                            }
-                        }
-                        return Ok(format!(
-                            "📁 File: {}\n🔊 AssemblyAI Transcription (Speaker Diarization)\n\n📝 Transcript:\n{}",
-                            audio_path, formatted_transcript
-                        ));
-                    }
-                }
-                
-                // Regular transcription without speaker diarization
                 let text = poll_result
                     .get("text")
                     .and_then(|v| v.as_str())
                     .unwrap_or("No transcription text available");
                 
+                // Format the response similar to Whisper
                 return Ok(format!(
                     "📁 File: {}\n🔊 AssemblyAI Transcription\n\n📝 Transcript:\n{}",
                     audio_path, text
@@ -1438,139 +1419,6 @@ async fn transcribe_with_assemblyai(
             }
         }
     }
-}
-
-#[tauri::command]
-async fn start_assemblyai_streaming(
-    api_key: String,
-    enable_speaker_diarization: bool,
-    window: tauri::Window
-) -> Result<String, String> {
-    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-    use futures_util::{SinkExt, StreamExt};
-    
-    // Create WebSocket URL with parameters
-    let mut ws_url = "wss://api.assemblyai.com/v2/realtime/ws".to_string();
-    ws_url.push_str("?sample_rate=16000");
-    if enable_speaker_diarization {
-        ws_url.push_str("&enable_extra_session_information=true");
-    }
-    
-    // Connect to AssemblyAI WebSocket
-    let (ws_stream, _) = connect_async(&ws_url)
-        .await
-        .map_err(|e| format!("Failed to connect to AssemblyAI WebSocket: {}", e))?;
-    
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    
-    // Send authentication message with speaker diarization enabled
-    let auth_message = serde_json::json!({
-        "authorization": api_key,
-        "sample_rate": 16000,
-        "encoding": "pcm_s16le",
-        "speaker_labels": enable_speaker_diarization,
-        "format_turns": enable_speaker_diarization
-    });
-    
-    ws_sender
-        .send(Message::Text(auth_message.to_string()))
-        .await
-        .map_err(|e| format!("Failed to send auth message: {}", e))?;
-    
-    // Clone window for the receiver task
-    let window_clone = window.clone();
-    
-    // Spawn task to handle incoming messages
-    tokio::spawn(async move {
-        while let Some(message) = ws_receiver.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(message_type) = data.get("message_type").and_then(|v| v.as_str()) {
-                            match message_type {
-                                "PartialTranscript" => {
-                                    if let Some(transcript_text) = data.get("text").and_then(|v| v.as_str()) {
-                                        // Format with speaker information if available
-                                        let formatted_text = if let Some(speaker) = data.get("speaker").and_then(|v| v.as_str()) {
-                                            format!("Speaker {}: {}", speaker, transcript_text)
-                                        } else {
-                                            transcript_text.to_string()
-                                        };
-                                        let _ = window_clone.emit("assemblyai-partial-transcript", formatted_text);
-                                    }
-                                }
-                                "FinalTranscript" => {
-                                    if let Some(transcript_text) = data.get("text").and_then(|v| v.as_str()) {
-                                        // Format with speaker information if available
-                                        let formatted_text = if let Some(speaker) = data.get("speaker").and_then(|v| v.as_str()) {
-                                            format!("Speaker {}: {}", speaker, transcript_text)
-                                        } else {
-                                            transcript_text.to_string()
-                                        };
-                                        let _ = window_clone.emit("assemblyai-final-transcript", formatted_text);
-                                    }
-                                }
-                                "Turn" => {
-                                    // Handle turn-based transcription with speaker diarization
-                                    if let Some(transcript_text) = data.get("transcript").and_then(|v| v.as_str()) {
-                                        if !transcript_text.trim().is_empty() {
-                                            let formatted_text = if let Some(speaker) = data.get("speaker").and_then(|v| v.as_str()) {
-                                                format!("Speaker {}: {}", speaker, transcript_text)
-                                            } else {
-                                                transcript_text.to_string()
-                                            };
-                                            let _ = window_clone.emit("assemblyai-final-transcript", formatted_text);
-                                        }
-                                    }
-                                }
-                                "SessionBegins" => {
-                                    let _ = window_clone.emit("assemblyai-session-begins", "Session started");
-                                }
-                                "SessionTerminated" => {
-                                    let _ = window_clone.emit("assemblyai-session-terminated", "Session ended");
-                                    break;
-                                }
-                                _ => {
-                                    println!("Unknown AssemblyAI message type: {}", message_type);
-                                    println!("Full message: {}", text);
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(Message::Close(_)) => {
-                    let _ = window_clone.emit("assemblyai-session-terminated", "Connection closed");
-                    break;
-                }
-                Err(e) => {
-                    let _ = window_clone.emit("assemblyai-error", format!("WebSocket error: {}", e));
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
-    
-    Ok("AssemblyAI streaming started successfully".to_string())
-}
-
-#[tauri::command]
-async fn send_audio_to_assemblyai(
-    audio_data: Vec<u8>
-) -> Result<(), String> {
-    use base64::Engine;
-    
-    // This would be called from the frontend to send audio chunks
-    // For now, we'll implement a basic version
-    // In a full implementation, you'd maintain the WebSocket connection
-    // and send audio data through it
-    
-    // Convert audio data to base64 for WebSocket transmission
-    let base64_audio = base64::engine::general_purpose::STANDARD.encode(&audio_data);
-    
-    // In a real implementation, you'd send this through the active WebSocket connection
-    // For now, we'll just return success
-    Ok(())
 }
 
 #[tauri::command]
@@ -1594,8 +1442,6 @@ pub fn run() {
             initialize_whisper,
             transcribe_audio,
             transcribe_with_assemblyai,
-            start_assemblyai_streaming,
-            send_audio_to_assemblyai,
             enable_realtime_transcription,
             disable_realtime_transcription,
             get_recording_status,
