@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from 'react-markdown';
+import TranscriptionSegments, { TranscriptionResult } from './components/TranscriptionSegments';
 import "./App.css";
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [transcript, setTranscript] = useState("");
+  const [transcriptionResult, setTranscriptionResult] = useState<TranscriptionResult | null>(null);
   const [whisperInitialized, setWhisperInitialized] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [lastRecordingPath, setLastRecordingPath] = useState("");
@@ -258,15 +260,18 @@ function App() {
       clearError();
       setIsTranscribing(true);
       setTranscript("Processing audio file...");
+      setTranscriptionResult(null);
       
-      const result = await invoke<string>("transcribe_audio", { audioPath: lastRecordingPath });
+      const result = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { audioPath: lastRecordingPath });
       console.log("Transcription result:", result);
       
-      setTranscript(result);
+      setTranscript(result.full_text);
+      setTranscriptionResult(result);
       
     } catch (error) {
       console.error("Failed to transcribe audio:", error);
       setTranscript("");
+      setTranscriptionResult(null);
       showError(`Failed to transcribe audio: ${error}`);
     } finally {
       setIsTranscribing(false);
@@ -353,6 +358,7 @@ function App() {
   const handleClearAll = () => {
     setRecordingTime(0);
     setTranscript("");
+    setTranscriptionResult(null);
     setRealtimeTranscript("");
     setMeetingMinutes("");
     setLastRecordingPath("");
@@ -547,23 +553,12 @@ function App() {
             
             <div>
               {(isRealtimeEnabled && isRecording) && (
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Final Transcript</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Final Transcript with Timestamps</h3>
               )}
-              {!transcript ? (
-                <div className="bg-gray-50 rounded-xl p-12 text-center">
-                  <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl text-gray-400">🎙️</span>
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-600 mb-2">No transcript available yet</h3>
-                  <p className="text-gray-500">Start recording to see live transcription</p>
-                </div>
-              ) : (
-                <div className="bg-gray-50 rounded-xl p-6 min-h-[200px] max-h-[400px] overflow-y-auto">
-                  <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
-                    {transcript}
-                  </p>
-                </div>
-              )}
+              <TranscriptionSegments 
+                result={transcriptionResult} 
+                isLoading={isTranscribing}
+              />
             </div>
           </div>
         </div>

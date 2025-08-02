@@ -8,6 +8,19 @@ use std::sync::mpsc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptionSegment {
+    pub start: f32,
+    pub end: f32,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptionResult {
+    pub segments: Vec<TranscriptionSegment>,
+    pub full_text: String,
+}
+
 
 pub struct AudioState {
     is_recording: Arc<Mutex<bool>>,
@@ -347,6 +360,36 @@ async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String) -> R
     }
 }
 
+#[tauri::command]
+async fn transcribe_audio_with_segments(state: State<'_, AudioState>, audio_path: String) -> Result<TranscriptionResult, String> {
+    let whisper_context = state.whisper_context.lock().map_err(|e| e.to_string())?;
+    
+    if whisper_context.is_none() {
+        return Err("Whisper not initialized. Please call initialize_whisper first.".to_string());
+    }
+    
+    // Check if audio file exists
+    if !std::path::Path::new(&audio_path).exists() {
+        return Err(format!("Audio file not found: {}", audio_path));
+    }
+    
+    // Load and validate audio file
+    let audio_data = match load_audio_file(&audio_path) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to process audio file: {}", e))
+    };
+    
+    // Perform actual transcription with segments
+    if let Some(ref ctx) = *whisper_context {
+        match transcribe_with_whisper_segments(ctx, &audio_data) {
+            Ok(result) => Ok(result),
+            Err(e) => Err(format!("Transcription failed: {}", e))
+        }
+    } else {
+        Err("Whisper context not available".to_string())
+    }
+}
+
 // Audio processing helper functions
 fn resample_audio(input: &[f32], input_rate: u32, output_rate: u32) -> Vec<f32> {
     if input_rate == output_rate {
@@ -474,6 +517,113 @@ fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<S
     } else {
         Ok(cleaned_text)
     }
+}
+
+fn transcribe_with_whisper_segments(ctx: &WhisperContext, audio_data: &[f32]) -> Result<TranscriptionResult, String> {
+    use whisper_rs::{FullParams, SamplingStrategy};
+    
+    let _duration = audio_data.len() as f32 / 16000.0;
+    
+    // Check if audio is too short
+    if audio_data.len() < 1600 { // Less than 0.1 seconds at 16kHz
+        return Ok(TranscriptionResult {
+            segments: vec![],
+            full_text: "(Audio too short for transcription)".to_string(),
+        });
+    }
+    
+    // Create a new state for this transcription
+    let mut state = ctx.create_state()
+        .map_err(|e| format!("Failed to create Whisper state: {}", e))?;
+    
+    // Set up parameters for transcription
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    
+    // Configure parameters for better transcription
+    params.set_n_threads(4); // Use 4 threads for faster processing
+    params.set_translate(false); // Don't translate, keep original language
+    params.set_language(Some("en")); // Set to English (can be made configurable)
+    params.set_print_progress(false); // Don't print progress to console
+    params.set_print_realtime(false); // Don't print realtime output
+    params.set_print_timestamps(false); // Don't print timestamps to console
+    
+    // Run the transcription
+    state.full(params, audio_data)
+        .map_err(|e| format!("Whisper transcription failed: {}", e))?;
+    
+    // Get the number of segments
+    let num_segments = state.full_n_segments()
+        .map_err(|e| format!("Failed to get segment count: {}", e))?;
+    
+    if num_segments == 0 {
+        return Ok(TranscriptionResult {
+            segments: vec![],
+            full_text: "(No speech detected)".to_string(),
+        });
+    }
+    
+    // Collect segments with timestamps
+    let mut segments = Vec::new();
+    let mut full_text = String::new();
+    
+    for i in 0..num_segments {
+        // Get segment text
+        let text = match state.full_get_segment_text(i) {
+            Ok(text) => text.trim().to_string(),
+            Err(e) => {
+                eprintln!("Warning: Failed to get segment {} text: {}", i, e);
+                continue;
+            }
+        };
+        
+        // Skip empty segments
+        if text.is_empty() {
+            continue;
+        }
+        
+        // Get segment timestamps (in centiseconds, convert to seconds)
+        let start_time = match state.full_get_segment_t0(i) {
+            Ok(t) => t as f32 / 100.0, // Convert centiseconds to seconds
+            Err(e) => {
+                eprintln!("Warning: Failed to get segment {} start time: {}", i, e);
+                0.0
+            }
+        };
+        
+        let end_time = match state.full_get_segment_t1(i) {
+            Ok(t) => t as f32 / 100.0, // Convert centiseconds to seconds
+            Err(e) => {
+                eprintln!("Warning: Failed to get segment {} end time: {}", i, e);
+                start_time + 1.0 // Default to 1 second duration
+            }
+        };
+        
+        // Add to segments
+        segments.push(TranscriptionSegment {
+            start: start_time,
+            end: end_time,
+            text: text.clone(),
+        });
+        
+        // Build full text
+        if !full_text.is_empty() {
+            full_text.push(' ');
+        }
+        full_text.push_str(&text);
+    }
+    
+    // Clean up the full text
+    let cleaned_text = full_text.trim().to_string();
+    let final_text = if cleaned_text.is_empty() {
+        "(No speech detected)".to_string()
+    } else {
+        cleaned_text
+    };
+    
+    Ok(TranscriptionResult {
+        segments,
+        full_text: final_text,
+    })
 }
 
 fn load_audio_file(path: &str) -> Result<Vec<f32>, String> {
@@ -1581,6 +1731,7 @@ pub fn run() {
             test_audio_system,
             initialize_whisper,
             transcribe_audio,
+            transcribe_audio_with_segments,
             enable_realtime_transcription,
             disable_realtime_transcription,
             get_recording_status,
