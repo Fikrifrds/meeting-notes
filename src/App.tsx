@@ -21,6 +21,7 @@ function App() {
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [micGain, setMicGain] = useState(2.5);
   const [systemGain, setSystemGain] = useState(1.5);
+  const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
   
   // Audio device selection state
   interface AudioDevice {
@@ -318,9 +319,10 @@ function App() {
     try {
       clearError();
       setIsGeneratingMinutes(true);
-      setMeetingMinutes("Generating meeting minutes with AI...");
+      setMeetingMinutes(`Generating meeting minutes with ${aiProvider.toUpperCase()}...`);
       
-      const result = await invoke<string>("generate_meeting_minutes", { transcript });
+      const command = aiProvider === 'ollama' ? 'generate_meeting_minutes_ollama' : 'generate_meeting_minutes';
+      const result = await invoke<string>(command, { transcript });
       console.log("Meeting minutes generated:", result);
       
       setMeetingMinutes(result);
@@ -328,7 +330,7 @@ function App() {
     } catch (error) {
       console.error("Failed to generate meeting minutes:", error);
       setMeetingMinutes("");
-      showError(`Failed to generate meeting minutes: ${error}`);
+      showError(`Failed to generate meeting minutes with ${aiProvider.toUpperCase()}: ${error}`);
     } finally {
       setIsGeneratingMinutes(false);
     }
@@ -675,6 +677,75 @@ function App() {
                     />
                     <span className="text-gray-700 font-medium">⚡ Enable Real-time Transcription</span>
                   </label>
+                </div>
+
+                {/* AI Provider Selection */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-gray-800">🤖 AI Provider for Meeting Minutes</h4>
+                  <div className="space-y-3">
+                    <label className="flex items-center space-x-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="aiProvider"
+                        value="ollama"
+                        checked={aiProvider === 'ollama'}
+                        onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-gray-700 font-medium">🏠 Ollama (Local)</span>
+                        <p className="text-sm text-gray-500">Private, runs locally on your device. Requires Ollama installation.</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center space-x-3 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="aiProvider"
+                        value="openai"
+                        checked={aiProvider === 'openai'}
+                        onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-gray-700 font-medium">☁️ OpenAI (Cloud)</span>
+                        <p className="text-sm text-gray-500">Fast and reliable. Requires API key and sends transcript to OpenAI.</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  {aiProvider === 'ollama' && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="text-green-600 text-lg">🔒</span>
+                        <div>
+                          <h5 className="font-medium text-green-900">Privacy First</h5>
+                          <p className="text-sm text-green-700 mt-1">
+                            Your transcript never leaves your device. Requires Ollama to be running locally.
+                          </p>
+                          <p className="text-xs text-green-600 mt-2">
+                            💡 Make sure Ollama is installed and running with a model like llama3.1:8b
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {aiProvider === 'openai' && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="text-yellow-600 text-lg">⚠️</span>
+                        <div>
+                          <h5 className="font-medium text-yellow-900">Privacy Notice</h5>
+                          <p className="text-sm text-yellow-700 mt-1">
+                            Transcript text will be sent to OpenAI for processing. Requires valid API key.
+                          </p>
+                          <p className="text-xs text-yellow-600 mt-2">
+                            💡 Set OPENAI_API_KEY in your .env file
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Audio Gain Settings */}

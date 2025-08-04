@@ -7,6 +7,7 @@ use std::thread;
 use std::sync::mpsc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use ollama_rs::{Ollama, generation::completion::request::GenerationRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionSegment {
@@ -283,8 +284,8 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     
     // Try multiple model options in order of preference
     let model_options = [
-        ("ggml-small.en.bin", "Small English (PRIORITIZED: Better accuracy than base)"),
         ("ggml-large-v3-turbo.bin", "Large V3 Turbo (Best: High accuracy + Fast speed)"),
+        ("ggml-small.en.bin", "Small English (PRIORITIZED: Better accuracy than base)"),
         ("ggml-base.en.bin", "Base English (Current fallback)"),
         ("ggml-medium.en.bin", "Medium English (High accuracy)"),
     ];
@@ -1675,6 +1676,56 @@ Format the output in clear, professional language with proper headings and bulle
 }
 
 #[tauri::command]
+async fn generate_meeting_minutes_ollama(transcript: String) -> Result<String, String> {
+    // Load environment variables
+    dotenv::dotenv().ok();
+    
+    // Get Ollama configuration from environment variables
+    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1:8b".to_string());
+
+    if transcript.trim().is_empty() {
+        return Err("No transcript provided for meeting minutes generation".to_string());
+    }
+
+    // Create the prompt for meeting minutes
+    let system_prompt = r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. Include:
+
+1. **Meeting Summary** - Brief overview of the meeting
+2. **Key Discussion Points** - Main topics discussed
+3. **Decisions Made** - Any decisions or conclusions reached
+4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
+5. **Next Steps** - Follow-up actions or future meetings
+
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc."#;
+
+    let full_prompt = format!("{}\n\nPlease generate meeting minutes from this transcript:\n\n{}", system_prompt, transcript);
+
+    // Initialize Ollama client
+    let ollama = Ollama::try_new(ollama_host)
+        .map_err(|e| format!("Failed to create Ollama client: {}", e))?;
+
+    // Create generation request
+    let request = GenerationRequest::new(ollama_model, full_prompt);
+
+    // Make the API call to Ollama
+    let response = ollama.generate(request).await
+        .map_err(|e| format!("Failed to generate meeting minutes with Ollama: {}", e))?;
+
+    let meeting_minutes = response.response;
+    
+    // Add simple metadata header
+    let now = chrono::Utc::now();
+    let formatted_minutes = format!(
+        "# Meeting Minutes\n\n**Generated:** {}\n**Source:** Audio Transcript (Ollama Local AI)\n\n---\n\n{}",
+        now.format("%Y-%m-%d %H:%M:%S UTC"),
+        meeting_minutes
+    );
+
+    Ok(formatted_minutes)
+}
+
+#[tauri::command]
 async fn save_meeting_minutes(meeting_minutes: String, filename: Option<String>) -> Result<String, String> {
     use std::fs;
     use std::io::Write;
@@ -1736,6 +1787,7 @@ pub fn run() {
             disable_realtime_transcription,
             get_recording_status,
             generate_meeting_minutes,
+            generate_meeting_minutes_ollama,
             save_meeting_minutes,
             get_gain_settings,
             set_gain_settings,
