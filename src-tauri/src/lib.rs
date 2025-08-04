@@ -8,6 +8,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use ollama_rs::{Ollama, generation::completion::request::GenerationRequest};
+use uuid;
+
+mod database;
+use database::{Database, Meeting, MeetingSegment};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionSegment {
@@ -77,6 +81,49 @@ impl AudioState {
             selected_mic_device: Arc::new(Mutex::new(None)),
             selected_system_device: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+pub struct DatabaseState {
+    db: Arc<Mutex<Option<Database>>>,
+}
+
+impl DatabaseState {
+    pub fn new() -> Self {
+        Self {
+            db: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn initialize(&self) -> Result<(), String> {
+        let home_dir = dirs::home_dir()
+            .ok_or("Could not find home directory")?;
+        
+        let app_dir = home_dir.join("Documents").join("MeetingRecorder");
+        std::fs::create_dir_all(&app_dir)
+            .map_err(|e| format!("Failed to create app directory: {}", e))?;
+        
+        let db_path = app_dir.join("meetings.db");
+        println!("📁 Initializing database at: {:?}", db_path);
+        
+        let database = Database::new(db_path)
+            .map_err(|e| format!("Failed to initialize database: {}", e))?;
+        
+        let mut db_guard = self.db.lock().map_err(|e| e.to_string())?;
+        *db_guard = Some(database);
+        
+        println!("✅ Database initialized successfully");
+        Ok(())
+    }
+
+    pub fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
+        self.db.lock().map_err(|e| e.to_string())
+    }
+}
+
+impl Default for DatabaseState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1596,7 +1643,7 @@ async fn set_gain_settings(state: State<'_, AudioState>, mic_gain: f32, system_g
 }
 
 #[tauri::command]
-async fn generate_meeting_minutes(transcript: String) -> Result<String, String> {
+async fn generate_meeting_minutes(transcript: String, language: Option<String>) -> Result<String, String> {
     // Load environment variables
     dotenv::dotenv().ok();
     
@@ -1617,8 +1664,28 @@ async fn generate_meeting_minutes(transcript: String) -> Result<String, String> 
         return Err("No transcript provided for meeting minutes generation".to_string());
     }
 
-    // Create the prompt for meeting minutes
-    let system_prompt = r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. Include:
+    // Create the prompt for meeting minutes with language awareness
+    let language_instruction = match language.as_deref() {
+        Some("id") => "Generate the meeting minutes in Indonesian (Bahasa Indonesia). Use professional Indonesian business language.",
+        Some("es") => "Generate the meeting minutes in Spanish. Use professional Spanish business language.",
+        Some("fr") => "Generate the meeting minutes in French. Use professional French business language.",
+        Some("de") => "Generate the meeting minutes in German. Use professional German business language.",
+        Some("it") => "Generate the meeting minutes in Italian. Use professional Italian business language.",
+        Some("pt") => "Generate the meeting minutes in Portuguese. Use professional Portuguese business language.",
+        Some("nl") => "Generate the meeting minutes in Dutch. Use professional Dutch business language.",
+        Some("ru") => "Generate the meeting minutes in Russian. Use professional Russian business language.",
+        Some("ja") => "Generate the meeting minutes in Japanese. Use professional Japanese business language.",
+        Some("ko") => "Generate the meeting minutes in Korean. Use professional Korean business language.",
+        Some("zh") => "Generate the meeting minutes in Chinese. Use professional Chinese business language.",
+        Some("ar") => "Generate the meeting minutes in Arabic. Use professional Arabic business language.",
+        Some("hi") => "Generate the meeting minutes in Hindi. Use professional Hindi business language.",
+        Some("tr") => "Generate the meeting minutes in Turkish. Use professional Turkish business language.",
+        Some("en") | _ => "Generate the meeting minutes in English. Use professional English business language.",
+    };
+
+    let system_prompt = format!(r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. {}
+
+Include the following sections:
 
 1. **Meeting Summary** - Brief overview of the meeting
 2. **Key Discussion Points** - Main topics discussed
@@ -1626,7 +1693,7 @@ async fn generate_meeting_minutes(transcript: String) -> Result<String, String> 
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
 
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc."#;
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document."#, language_instruction);
 
     let user_prompt = format!("Please generate meeting minutes from this transcript:\n\n{}", transcript);
 
@@ -1690,7 +1757,7 @@ Format the output in clear, professional language with proper headings and bulle
 }
 
 #[tauri::command]
-async fn generate_meeting_minutes_ollama(transcript: String) -> Result<String, String> {
+async fn generate_meeting_minutes_ollama(transcript: String, language: Option<String>) -> Result<String, String> {
     // Load environment variables
     dotenv::dotenv().ok();
     
@@ -1702,8 +1769,28 @@ async fn generate_meeting_minutes_ollama(transcript: String) -> Result<String, S
         return Err("No transcript provided for meeting minutes generation".to_string());
     }
 
-    // Create the prompt for meeting minutes
-    let system_prompt = r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. Include:
+    // Create the prompt for meeting minutes with language awareness
+    let language_instruction = match language.as_deref() {
+        Some("id") => "Generate the meeting minutes in Indonesian (Bahasa Indonesia). Use professional Indonesian business language.",
+        Some("es") => "Generate the meeting minutes in Spanish. Use professional Spanish business language.",
+        Some("fr") => "Generate the meeting minutes in French. Use professional French business language.",
+        Some("de") => "Generate the meeting minutes in German. Use professional German business language.",
+        Some("it") => "Generate the meeting minutes in Italian. Use professional Italian business language.",
+        Some("pt") => "Generate the meeting minutes in Portuguese. Use professional Portuguese business language.",
+        Some("nl") => "Generate the meeting minutes in Dutch. Use professional Dutch business language.",
+        Some("ru") => "Generate the meeting minutes in Russian. Use professional Russian business language.",
+        Some("ja") => "Generate the meeting minutes in Japanese. Use professional Japanese business language.",
+        Some("ko") => "Generate the meeting minutes in Korean. Use professional Korean business language.",
+        Some("zh") => "Generate the meeting minutes in Chinese. Use professional Chinese business language.",
+        Some("ar") => "Generate the meeting minutes in Arabic. Use professional Arabic business language.",
+        Some("hi") => "Generate the meeting minutes in Hindi. Use professional Hindi business language.",
+        Some("tr") => "Generate the meeting minutes in Turkish. Use professional Turkish business language.",
+        Some("en") | _ => "Generate the meeting minutes in English. Use professional English business language.",
+    };
+
+    let system_prompt = format!(r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. {}
+
+Include the following sections:
 
 1. **Meeting Summary** - Brief overview of the meeting
 2. **Key Discussion Points** - Main topics discussed
@@ -1711,7 +1798,7 @@ async fn generate_meeting_minutes_ollama(transcript: String) -> Result<String, S
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
 
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc."#;
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document."#, language_instruction);
 
     let full_prompt = format!("{}\n\nPlease generate meeting minutes from this transcript:\n\n{}", system_prompt, transcript);
 
@@ -1774,6 +1861,267 @@ async fn save_meeting_minutes(meeting_minutes: String, filename: Option<String>)
     Ok(format!("Meeting minutes saved to: {}", file_path.display()))
 }
 
+// Database Commands
+
+#[tauri::command]
+async fn initialize_database(db_state: State<'_, DatabaseState>) -> Result<String, String> {
+    db_state.initialize()?;
+    Ok("Database initialized successfully".to_string())
+}
+
+#[tauri::command]
+async fn create_meeting(
+    db_state: State<'_, DatabaseState>,
+    title: String,
+    language: Option<String>
+) -> Result<Meeting, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let meeting = db.create_meeting(title, language)
+        .map_err(|e| format!("Failed to create meeting: {}", e))?;
+    
+    Ok(meeting)
+}
+
+#[tauri::command]
+async fn update_meeting(
+    db_state: State<'_, DatabaseState>,
+    meeting: Meeting
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    db.update_meeting(&meeting)
+        .map_err(|e| format!("Failed to update meeting: {}", e))?;
+    
+    Ok("Meeting updated successfully".to_string())
+}
+
+#[tauri::command]
+async fn update_meeting_title(
+    db_state: State<'_, DatabaseState>,
+    id: String,
+    title: String
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    // Get the existing meeting
+    let mut meeting = db.get_meeting(&id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or("Meeting not found")?;
+    
+    // Update the title
+    meeting.title = title;
+    
+    // Save the updated meeting
+    db.update_meeting(&meeting)
+        .map_err(|e| format!("Failed to update meeting title: {}", e))?;
+    
+    Ok("Meeting title updated successfully".to_string())
+}
+
+#[tauri::command]
+async fn save_transcript_to_database(
+    db_state: State<'_, DatabaseState>,
+    title: String,
+    transcript: String,
+    segments: Vec<TranscriptionSegment>,
+    language: Option<String>,
+    audio_file_path: Option<String>
+) -> Result<Meeting, String> {
+    // Initialize database if not already done
+    db_state.initialize().ok();
+    
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    // Create a new meeting
+    let mut meeting = db.create_meeting(title, language)
+        .map_err(|e| format!("Failed to create meeting: {}", e))?;
+    
+    // Update meeting with transcript and audio file path
+    meeting.transcript = Some(transcript);
+    meeting.audio_file_path = audio_file_path;
+    db.update_meeting(&meeting)
+        .map_err(|e| format!("Failed to update meeting with transcript: {}", e))?;
+    
+    // Add segments to the meeting
+    for segment in segments {
+        let meeting_segment = MeetingSegment {
+            id: uuid::Uuid::new_v4().to_string(),
+            meeting_id: meeting.id.clone(),
+            start_time: segment.start as f64,
+            end_time: segment.end as f64,
+            text: segment.text,
+            confidence: None,
+        };
+        
+        db.add_meeting_segment(&meeting_segment)
+            .map_err(|e| format!("Failed to add meeting segment: {}", e))?;
+    }
+    
+    Ok(meeting)
+}
+
+#[tauri::command]
+async fn save_meeting_minutes_to_database(
+    db_state: State<'_, DatabaseState>,
+    meeting_id: String,
+    meeting_minutes: String,
+    ai_provider: String
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    // Get the existing meeting
+    let mut meeting = db.get_meeting(&meeting_id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or("Meeting not found")?;
+    
+    // Update meeting with minutes
+    meeting.meeting_minutes = Some(meeting_minutes);
+    meeting.ai_provider = Some(ai_provider);
+    
+    db.update_meeting(&meeting)
+        .map_err(|e| format!("Failed to update meeting with minutes: {}", e))?;
+    
+    Ok("Meeting minutes saved to database successfully".to_string())
+}
+
+#[tauri::command]
+async fn get_meeting(
+    db_state: State<'_, DatabaseState>,
+    id: String
+) -> Result<Option<Meeting>, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let meeting = db.get_meeting(&id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?;
+    
+    Ok(meeting)
+}
+
+#[tauri::command]
+async fn get_all_meetings(
+    db_state: State<'_, DatabaseState>
+) -> Result<Vec<Meeting>, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let meetings = db.get_all_meetings()
+        .map_err(|e| format!("Failed to get meetings: {}", e))?;
+    
+    Ok(meetings)
+}
+
+#[tauri::command]
+async fn delete_meeting(
+    db_state: State<'_, DatabaseState>,
+    id: String
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    db.delete_meeting(&id)
+        .map_err(|e| format!("Failed to delete meeting: {}", e))?;
+    
+    Ok("Meeting deleted successfully".to_string())
+}
+
+#[tauri::command]
+async fn search_meetings(
+    db_state: State<'_, DatabaseState>,
+    query: String
+) -> Result<Vec<Meeting>, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let meetings = db.search_meetings(&query)
+        .map_err(|e| format!("Failed to search meetings: {}", e))?;
+    
+    Ok(meetings)
+}
+
+#[tauri::command]
+async fn add_meeting_segment(
+    db_state: State<'_, DatabaseState>,
+    meeting_id: String,
+    start_time: f64,
+    end_time: f64,
+    text: String,
+    confidence: Option<f64>
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let segment = MeetingSegment {
+        id: uuid::Uuid::new_v4().to_string(),
+        meeting_id,
+        start_time,
+        end_time,
+        text,
+        confidence,
+    };
+    
+    db.add_meeting_segment(&segment)
+        .map_err(|e| format!("Failed to add meeting segment: {}", e))?;
+    
+    Ok("Meeting segment added successfully".to_string())
+}
+
+#[tauri::command]
+async fn get_meeting_segments(
+    db_state: State<'_, DatabaseState>,
+    meeting_id: String
+) -> Result<Vec<MeetingSegment>, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    let segments = db.get_meeting_segments(&meeting_id)
+        .map_err(|e| format!("Failed to get meeting segments: {}", e))?;
+    
+    Ok(segments)
+}
+
+#[tauri::command]
+async fn get_audio_file_data(file_path: String) -> Result<String, String> {
+    use std::fs;
+    use base64::{Engine as _, engine::general_purpose};
+    
+    // Read the audio file
+    let audio_data = fs::read(&file_path)
+        .map_err(|e| format!("Failed to read audio file: {}", e))?;
+    
+    // Convert to base64
+    let base64_data = general_purpose::STANDARD.encode(&audio_data);
+    
+    // Determine MIME type based on file extension
+    let mime_type = if file_path.ends_with(".wav") {
+        "audio/wav"
+    } else if file_path.ends_with(".mp3") {
+        "audio/mpeg"
+    } else {
+        "audio/wav" // default
+    };
+    
+    // Return as data URL
+    Ok(format!("data:{};base64,{}", mime_type, base64_data))
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -1784,6 +2132,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AudioState::default())
+        .manage(DatabaseState::default())
         .invoke_handler(tauri::generate_handler![
             start_recording, 
             stop_recording, 
@@ -1805,6 +2154,20 @@ pub fn run() {
             save_meeting_minutes,
             get_gain_settings,
             set_gain_settings,
+            // Database commands
+            initialize_database,
+            create_meeting,
+            update_meeting,
+            update_meeting_title,
+            get_meeting,
+            get_all_meetings,
+            delete_meeting,
+            search_meetings,
+            add_meeting_segment,
+            get_meeting_segments,
+            save_transcript_to_database,
+            save_meeting_minutes_to_database,
+            get_audio_file_data,
             greet
         ])
         .run(tauri::generate_context!())

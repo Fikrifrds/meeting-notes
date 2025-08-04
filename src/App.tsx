@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from 'react-markdown';
 import TranscriptionSegments, { TranscriptionResult } from './components/TranscriptionSegments';
+import MeetingsManager from "./components/MeetingsManager";
 import "./App.css";
 
 function App() {
@@ -44,12 +45,14 @@ function App() {
   const [realtimeTranscript, setRealtimeTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [currentView, setCurrentView] = useState<'recording' | 'meetings'>('recording');
   const [meetingMinutes, setMeetingMinutes] = useState("");
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [micGain, setMicGain] = useState(2.5);
   const [systemGain, setSystemGain] = useState(1.5);
   const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // Default to English
+  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null); // Track current meeting
   
   // Audio device selection state
   interface AudioDevice {
@@ -85,10 +88,28 @@ function App() {
     const timer = setTimeout(() => {
       loadAudioDevices();
       loadGainSettings();
+      // Auto-initialize Whisper and database
+      autoInitialize();
     }, 1000);
     
     return () => clearTimeout(timer);
   }, []);
+
+  // Auto-initialize Whisper and database
+  const autoInitialize = async () => {
+    try {
+      // Initialize database
+      await invoke("initialize_database");
+      console.log("Database auto-initialized");
+      
+      // Initialize Whisper
+      await initializeWhisper();
+      console.log("Whisper auto-initialized");
+    } catch (error) {
+      console.error("Auto-initialization failed:", error);
+      showError(`Auto-initialization failed: ${error}`);
+    }
+  };
 
   // Listen for real-time transcription events
   useEffect(() => {
@@ -247,6 +268,8 @@ function App() {
       setRecordingTime(0);
       setTranscript("");
       setRealtimeTranscript("");
+      setMeetingMinutes("");
+      setCurrentMeetingId(null); // Clear previous meeting ID
       
       const result = await invoke("start_recording");
       console.log("Recording started:", result);
@@ -270,12 +293,59 @@ function App() {
       const pathMatch = result.match(/Recording stopped and saved: (.+)/);
       if (pathMatch) {
         setLastRecordingPath(pathMatch[1]);
+        
+        // Auto-transcribe and save to database
+        await autoTranscribeAndSave(pathMatch[1]);
       }
       
     } catch (error) {
       console.error("Failed to stop recording:", error);
       setIsRecording(false);
       showError(`Failed to stop recording: ${error}`);
+    }
+  };
+
+  // Auto-transcribe and save to database
+  const autoTranscribeAndSave = async (audioPath: string) => {
+    try {
+      setIsTranscribing(true);
+      setTranscript("Auto-transcribing audio...");
+      
+      // Transcribe audio
+      const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+      const transcriptionResult = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { 
+        audioPath: audioPath,
+        language: languageParam 
+      });
+      
+      setTranscript(transcriptionResult.full_text);
+      setTranscriptionResult(transcriptionResult);
+      
+      // Auto-save transcript to database
+      const currentDate = new Date();
+      const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
+      
+      const savedMeeting = await invoke("save_transcript_to_database", {
+         title: meetingTitle,
+         transcript: transcriptionResult.full_text,
+         segments: transcriptionResult.segments,
+         language: languageParam,
+         audioFilePath: lastRecordingPath
+       });
+       
+       // Store the meeting ID for later use
+       if (savedMeeting && savedMeeting.id) {
+         setCurrentMeetingId(savedMeeting.id);
+       }
+       
+       console.log("Transcript auto-saved to database:", savedMeeting);
+       showError("✅ Recording transcribed and saved to database automatically!");
+      
+    } catch (error) {
+      console.error("Auto-transcription failed:", error);
+      showError(`Auto-transcription failed: ${error}`);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -355,10 +425,17 @@ function App() {
       setMeetingMinutes(`Generating meeting minutes with ${aiProvider.toUpperCase()}...`);
       
       const command = aiProvider === 'ollama' ? 'generate_meeting_minutes_ollama' : 'generate_meeting_minutes';
-      const result = await invoke<string>(command, { transcript });
+      const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+      const result = await invoke<string>(command, { 
+        transcript,
+        language: languageParam 
+      });
       console.log("Meeting minutes generated:", result);
       
       setMeetingMinutes(result);
+      
+      // Auto-save meeting minutes to database
+      await autoSaveMeetingMinutes(result);
       
     } catch (error) {
       console.error("Failed to generate meeting minutes:", error);
@@ -369,26 +446,30 @@ function App() {
     }
   };
 
-  const saveMeetingMinutes = async () => {
-    if (!meetingMinutes.trim()) {
-      showError("No meeting minutes to save. Please generate meeting minutes first.");
+  // Auto-save meeting minutes to database
+  const autoSaveMeetingMinutes = async (minutes: string) => {
+    if (!currentMeetingId) {
+      console.warn("No current meeting ID available for saving minutes");
       return;
     }
-
+    
     try {
-      clearError();
-      const result = await invoke<string>("save_meeting_minutes", { 
-        meetingMinutes: meetingMinutes,
-        filename: null 
+      await invoke("save_meeting_minutes_to_database", {
+        meetingId: currentMeetingId,
+        meetingMinutes: minutes,
+        aiProvider: aiProvider
       });
-      console.log("Meeting minutes saved:", result);
-      showError(`Meeting minutes saved successfully!\n${result}`);
+      
+      console.log("Meeting minutes auto-saved to database");
+      showError("✅ Meeting minutes generated and saved to database automatically!");
       
     } catch (error) {
-      console.error("Error saving meeting minutes:", error);
-      showError(`Error saving meeting minutes: ${error}`);
+      console.error("Failed to auto-save meeting minutes:", error);
+      showError(`Failed to auto-save meeting minutes: ${error}`);
     }
   };
+
+
 
   const handleClearAll = () => {
     setRecordingTime(0);
@@ -398,6 +479,7 @@ function App() {
     setMeetingMinutes("");
     setLastRecordingPath("");
     setRecordingStatus("Not recording");
+    setCurrentMeetingId(null);
     clearError();
   };
 
@@ -441,7 +523,32 @@ function App() {
               </div>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
+              {/* Navigation Tabs */}
+              <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setCurrentView('recording')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'recording'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  🎙️ Recording
+                </button>
+                <button
+                  onClick={() => setCurrentView('meetings')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    currentView === 'meetings'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  📋 Meetings
+                </button>
+              </div>
+              
+              {/* Status Indicator */}
               <div className="flex items-center space-x-2">
                 <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
                 <span className="text-sm font-medium text-gray-700">
@@ -486,6 +593,10 @@ function App() {
       )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {currentView === 'meetings' ? (
+          <MeetingsManager />
+        ) : (
+          <>
         {/* Recording Section */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
           <div className="text-center">
@@ -634,17 +745,7 @@ function App() {
             )}
           </div>
           
-          {meetingMinutes && (
-            <div className="mt-6 flex justify-end">
-              <button 
-                className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
-                onClick={saveMeetingMinutes}
-              >
-                <span className="mr-2">💾</span>
-                Save Minutes
-              </button>
-            </div>
-          )}
+
         </div>
 
         {/* Action Buttons */}
@@ -1005,6 +1106,8 @@ function App() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
 
         {/* Footer */}
