@@ -2098,28 +2098,265 @@ async fn get_meeting_segments(
 }
 
 #[tauri::command]
-async fn get_audio_file_data(file_path: String) -> Result<String, String> {
+async fn get_audio_file_data(file_path: String) -> Result<Vec<u8>, String> {
     use std::fs;
-    use base64::{Engine as _, engine::general_purpose};
     
     // Read the audio file
     let audio_data = fs::read(&file_path)
         .map_err(|e| format!("Failed to read audio file: {}", e))?;
     
-    // Convert to base64
-    let base64_data = general_purpose::STANDARD.encode(&audio_data);
+    Ok(audio_data)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ExportOptions {
+    pub format: String, // "pdf", "txt", "json", "md"
+    pub include_transcript: bool,
+    pub include_audio: bool,
+    pub include_summary: bool,
+    pub include_segments: bool,
+}
+
+#[tauri::command]
+async fn export_meeting_data(
+    db_state: State<'_, DatabaseState>,
+    meeting_id: String,
+    options: ExportOptions
+) -> Result<String, String> {
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
     
-    // Determine MIME type based on file extension
-    let mime_type = if file_path.ends_with(".wav") {
-        "audio/wav"
-    } else if file_path.ends_with(".mp3") {
-        "audio/mpeg"
+    // Get meeting data
+    let meeting = db.get_meeting(&meeting_id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or("Meeting not found")?;
+    
+    let segments = if options.include_segments {
+        db.get_meeting_segments(&meeting_id)
+            .map_err(|e| format!("Failed to get meeting segments: {}", e))?
     } else {
-        "audio/wav" // default
+        Vec::new()
     };
     
-    // Return as data URL
-    Ok(format!("data:{};base64,{}", mime_type, base64_data))
+    // Create export directory
+    let home_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?;
+    let export_dir = home_dir.join("Documents").join("MeetingRecorder").join("exports");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export directory: {}", e))?;
+    
+    // Generate filename
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let safe_title = meeting.title.chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' { c } else { '_' })
+        .collect::<String>()
+        .replace(' ', "_");
+    
+    let filename = format!("{}_{}.{}", safe_title, timestamp, options.format);
+    let file_path = export_dir.join(&filename);
+    
+    match options.format.as_str() {
+        "txt" => export_as_txt(&meeting, &segments, &options, &file_path)?,
+        "json" => export_as_json(&meeting, &segments, &options, &file_path)?,
+        "md" => export_as_markdown(&meeting, &segments, &options, &file_path)?,
+        _ => return Err(format!("Unsupported export format: {}", options.format)),
+    }
+    
+    Ok(format!("Meeting data exported to: {}", file_path.display()))
+}
+
+fn export_as_txt(
+    meeting: &Meeting,
+    segments: &[MeetingSegment],
+    options: &ExportOptions,
+    file_path: &std::path::Path
+) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create export file: {}", e))?;
+    
+    // Header
+    writeln!(file, "MEETING EXPORT").map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "==============").map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "Title: {}", meeting.title).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "Date: {}", meeting.created_at).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "Duration: {} seconds", meeting.duration_seconds.unwrap_or(0)).map_err(|e| format!("Write error: {}", e))?;
+    if let Some(lang) = &meeting.language {
+        writeln!(file, "Language: {}", lang).map_err(|e| format!("Write error: {}", e))?;
+    }
+    if let Some(provider) = &meeting.ai_provider {
+        writeln!(file, "AI Provider: {}", provider).map_err(|e| format!("Write error: {}", e))?;
+    }
+    writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    
+    // Summary/Minutes
+    if options.include_summary {
+        if let Some(minutes) = &meeting.meeting_minutes {
+            writeln!(file, "AI MEETING SUMMARY").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "==================").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "{}", minutes).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    // Transcript
+    if options.include_transcript {
+        if let Some(transcript) = &meeting.transcript {
+            writeln!(file, "FULL TRANSCRIPT").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "===============").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "{}", transcript).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    // Segments
+    if options.include_segments && !segments.is_empty() {
+        writeln!(file, "TRANSCRIPT SEGMENTS").map_err(|e| format!("Write error: {}", e))?;
+        writeln!(file, "===================").map_err(|e| format!("Write error: {}", e))?;
+        for (i, segment) in segments.iter().enumerate() {
+            writeln!(file, "[{}] {:.2}s - {:.2}s: {}", 
+                     i + 1, segment.start_time, segment.end_time, segment.text).map_err(|e| format!("Write error: {}", e))?;
+        }
+        writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    }
+    
+    // Audio info
+    if options.include_audio {
+        if let Some(audio_path) = &meeting.audio_file_path {
+            writeln!(file, "AUDIO FILE").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "==========").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "File: {}", audio_path).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    Ok(())
+}
+
+fn export_as_json(
+    meeting: &Meeting,
+    segments: &[MeetingSegment],
+    options: &ExportOptions,
+    file_path: &std::path::Path
+) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    use serde_json::json;
+    
+    let mut export_data = json!({
+        "meeting": {
+            "id": meeting.id,
+            "title": meeting.title,
+            "created_at": meeting.created_at,
+            "updated_at": meeting.updated_at,
+            "duration_seconds": meeting.duration_seconds,
+            "language": meeting.language,
+            "ai_provider": meeting.ai_provider
+        },
+        "export_timestamp": chrono::Utc::now().to_rfc3339(),
+        "export_options": options
+    });
+    
+    if options.include_transcript {
+        export_data["transcript"] = json!(meeting.transcript);
+    }
+    
+    if options.include_summary {
+        export_data["meeting_minutes"] = json!(meeting.meeting_minutes);
+    }
+    
+    if options.include_audio {
+        export_data["audio_file_path"] = json!(meeting.audio_file_path);
+    }
+    
+    if options.include_segments && !segments.is_empty() {
+        export_data["segments"] = json!(segments);
+    }
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create export file: {}", e))?;
+    
+    let json_string = serde_json::to_string_pretty(&export_data)
+        .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+    
+    file.write_all(json_string.as_bytes())
+        .map_err(|e| format!("Failed to write JSON file: {}", e))?;
+    
+    Ok(())
+}
+
+fn export_as_markdown(
+    meeting: &Meeting,
+    segments: &[MeetingSegment],
+    options: &ExportOptions,
+    file_path: &std::path::Path
+) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create export file: {}", e))?;
+    
+    // Header
+    writeln!(file, "# {}", meeting.title).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "**Date:** {}", meeting.created_at).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "**Duration:** {} seconds", meeting.duration_seconds.unwrap_or(0)).map_err(|e| format!("Write error: {}", e))?;
+    if let Some(lang) = &meeting.language {
+        writeln!(file, "**Language:** {}", lang).map_err(|e| format!("Write error: {}", e))?;
+    }
+    if let Some(provider) = &meeting.ai_provider {
+        writeln!(file, "**AI Provider:** {}", provider).map_err(|e| format!("Write error: {}", e))?;
+    }
+    writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file, "---").map_err(|e| format!("Write error: {}", e))?;
+    writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+    
+    // Summary/Minutes
+    if options.include_summary {
+        if let Some(minutes) = &meeting.meeting_minutes {
+            writeln!(file, "## AI Meeting Summary").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "{}", minutes).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    // Transcript
+    if options.include_transcript {
+        if let Some(transcript) = &meeting.transcript {
+            writeln!(file, "## Full Transcript").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "{}", transcript).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    // Segments
+    if options.include_segments && !segments.is_empty() {
+        writeln!(file, "## Transcript Segments").map_err(|e| format!("Write error: {}", e))?;
+        writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        for (i, segment) in segments.iter().enumerate() {
+            writeln!(file, "### Segment {}", i + 1).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "**Time:** {:.2}s - {:.2}s", segment.start_time, segment.end_time).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "{}", segment.text).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    // Audio info
+    if options.include_audio {
+        if let Some(audio_path) = &meeting.audio_file_path {
+            writeln!(file, "## Audio File").map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file).map_err(|e| format!("Write error: {}", e))?;
+            writeln!(file, "**File Path:** `{}`", audio_path).map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -2168,6 +2405,7 @@ pub fn run() {
             save_transcript_to_database,
             save_meeting_minutes_to_database,
             get_audio_file_data,
+            export_meeting_data,
             greet
         ])
         .run(tauri::generate_context!())

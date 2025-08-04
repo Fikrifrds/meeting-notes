@@ -35,6 +35,15 @@ const MeetingsManager: React.FC = () => {
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportOptions, setExportOptions] = useState({
+    format: 'md',
+    include_transcript: true,
+    include_audio: false,
+    include_summary: true,
+    include_segments: true,
+  });
+  const [isExporting, setIsExporting] = useState(false);
 
   // Audio player state
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null);
@@ -271,6 +280,30 @@ const MeetingsManager: React.FC = () => {
       return `${minutes}m ${remainingSeconds}s`;
     } else {
       return `${remainingSeconds}s`;
+    }
+  };
+
+  const exportMeeting = async () => {
+    if (!selectedMeeting) {
+      setError('No meeting selected for export');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const result = await invoke<string>('export_meeting_data', {
+        meetingId: selectedMeeting.id,
+        options: exportOptions
+      });
+      
+      console.log('Export successful:', result);
+      setError(`✅ ${result}`);
+      setShowExportDialog(false);
+    } catch (error) {
+      console.error('Export failed:', error);
+      setError(`Failed to export meeting: ${error}`);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -623,11 +656,14 @@ const MeetingsManager: React.FC = () => {
                           {isPlaying ? 'Pause Audio' : 'Play Audio'}
                         </button>
                       )}
-                      <button className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium">
+                      <button 
+                        onClick={() => setShowExportDialog(true)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl transition-colors font-medium"
+                      >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        Export
+                        Export Meeting
                       </button>
                     </div>
 
@@ -983,6 +1019,127 @@ const MeetingsManager: React.FC = () => {
                       setNewMeetingTitle('');
                     }}
                     className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Export Meeting Dialog */}
+        {showExportDialog && selectedMeeting && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-gray-900">Export Meeting</h3>
+                <button
+                  onClick={() => setShowExportDialog(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-2"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-medium text-gray-900 mb-2">📋 {selectedMeeting.title}</h4>
+                  <p className="text-sm text-gray-600">Created: {formatDate(selectedMeeting.created_at)}</p>
+                  <p className="text-sm text-gray-600">Duration: {formatDuration(selectedMeeting.duration_seconds)}</p>
+                </div>
+
+                {/* Export Format */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Export Format</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { value: 'md', label: 'Markdown', icon: '📝', desc: 'Rich formatting' },
+                      { value: 'txt', label: 'Text', icon: '📄', desc: 'Plain text' },
+                      { value: 'json', label: 'JSON', icon: '⚙️', desc: 'Structured data' }
+                    ].map((format) => (
+                      <label key={format.value} className="cursor-pointer">
+                        <input
+                          type="radio"
+                          name="format"
+                          value={format.value}
+                          checked={exportOptions.format === format.value}
+                          onChange={(e) => setExportOptions({...exportOptions, format: e.target.value})}
+                          className="sr-only"
+                        />
+                        <div className={`p-3 rounded-lg border-2 text-center transition-colors ${
+                          exportOptions.format === format.value
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}>
+                          <div className="text-lg mb-1">{format.icon}</div>
+                          <div className="font-medium text-sm">{format.label}</div>
+                          <div className="text-xs text-gray-500">{format.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Export Options */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Include in Export</label>
+                  <div className="space-y-3">
+                    {[
+                      { key: 'include_transcript', label: 'Full Transcript', desc: 'Complete meeting transcript' },
+                      { key: 'include_summary', label: 'AI Summary', desc: 'Generated meeting minutes' },
+                      { key: 'include_segments', label: 'Transcript Segments', desc: 'Timestamped text segments' },
+                      { key: 'include_audio', label: 'Audio File Info', desc: 'Audio file path and metadata' }
+                    ].map((option) => (
+                      <label key={option.key} className="flex items-start space-x-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={exportOptions[option.key as keyof typeof exportOptions] as boolean}
+                          onChange={(e) => setExportOptions({
+                            ...exportOptions,
+                            [option.key]: e.target.checked
+                          })}
+                          className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div>
+                          <div className="font-medium text-gray-900">{option.label}</div>
+                          <div className="text-sm text-gray-500">{option.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={exportMeeting}
+                    disabled={isExporting}
+                    className="flex-1 px-4 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    {isExporting ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Export Meeting
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowExportDialog(false)}
+                    disabled={isExporting}
+                    className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 rounded-xl transition-colors font-medium"
                   >
                     Cancel
                   </button>

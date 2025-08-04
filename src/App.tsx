@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from 'react-markdown';
 import TranscriptionSegments, { TranscriptionResult } from './components/TranscriptionSegments';
@@ -325,7 +325,7 @@ function App() {
       const currentDate = new Date();
       const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
       
-      const savedMeeting = await invoke("save_transcript_to_database", {
+      const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
          title: meetingTitle,
          transcript: transcriptionResult.full_text,
          segments: transcriptionResult.segments,
