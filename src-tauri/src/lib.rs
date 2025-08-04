@@ -283,11 +283,16 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
     
     // Try multiple model options in order of preference
+    // Note: Prioritizing multilingual models for better Indonesian support
+    // Turbo model has issues with non-English languages (hallucinations)
     let model_options = [
-        ("ggml-large-v3-turbo.bin", "Large V3 Turbo (Best: High accuracy + Fast speed)"),
-        ("ggml-small.en.bin", "Small English (PRIORITIZED: Better accuracy than base)"),
-        ("ggml-base.en.bin", "Base English (Current fallback)"),
-        ("ggml-medium.en.bin", "Medium English (High accuracy)"),
+        ("ggml-large-v3-turbo.bin", "Large V3 Turbo (Fast, supports Indonesian with language param)"),
+        ("ggml-large-v3.bin", "Large V3 Multilingual (RECOMMENDED: Best for Indonesian)"),
+        ("ggml-medium.bin", "Medium Multilingual (Good balance for Indonesian)"),
+        ("ggml-small.bin", "Small Multilingual (Faster, good for Indonesian)"),
+        ("ggml-small.en.bin", "Small English (English only)"),
+        ("ggml-base.en.bin", "Base English (English only)"),
+        ("ggml-medium.en.bin", "Medium English (English only)"),
     ];
     
     let mut model_path = None;
@@ -305,10 +310,13 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     let model_path = model_path.ok_or_else(|| {
         format!(
             "No Whisper model found. Please download one of these models to {}:\n\
-            1. ggml-small.en.bin (PRIORITIZED - Good upgrade from base)\n\
-            2. ggml-large-v3-turbo.bin (RECOMMENDED - Best accuracy + speed)\n\
-            3. ggml-medium.en.bin (High accuracy)\n\
-            4. ggml-base.en.bin (Current fallback)\n\n\
+            FOR INDONESIAN SUPPORT (RECOMMENDED):\n\
+            1. ggml-large-v3.bin (Best accuracy for Indonesian)\n\
+            2. ggml-medium.bin (Good balance for Indonesian)\n\
+            3. ggml-small.bin (Faster, good for Indonesian)\n\n\
+            FOR ENGLISH ONLY:\n\
+            4. ggml-large-v3-turbo.bin (Fast but may hallucinate on Indonesian)\n\
+            5. ggml-small.en.bin (English only)\n\n\
             Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main", 
             models_dir.display()
         )
@@ -326,7 +334,7 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
 }
 
 #[tauri::command]
-async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String) -> Result<String, String> {
+async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String, language: Option<String>) -> Result<String, String> {
     let whisper_context = state.whisper_context.lock().map_err(|e| e.to_string())?;
     
     if whisper_context.is_none() {
@@ -346,7 +354,7 @@ async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String) -> R
     
     // Perform actual transcription
     if let Some(ref ctx) = *whisper_context {
-        match transcribe_with_whisper(ctx, &audio_data) {
+        match transcribe_with_whisper(ctx, &audio_data, language.as_deref()) {
             Ok(transcript) => {
                 let duration = audio_data.len() as f32 / 16000.0;
                 Ok(format!(
@@ -362,7 +370,7 @@ async fn transcribe_audio(state: State<'_, AudioState>, audio_path: String) -> R
 }
 
 #[tauri::command]
-async fn transcribe_audio_with_segments(state: State<'_, AudioState>, audio_path: String) -> Result<TranscriptionResult, String> {
+async fn transcribe_audio_with_segments(state: State<'_, AudioState>, audio_path: String, language: Option<String>) -> Result<TranscriptionResult, String> {
     let whisper_context = state.whisper_context.lock().map_err(|e| e.to_string())?;
     
     if whisper_context.is_none() {
@@ -382,7 +390,7 @@ async fn transcribe_audio_with_segments(state: State<'_, AudioState>, audio_path
     
     // Perform actual transcription with segments
     if let Some(ref ctx) = *whisper_context {
-        match transcribe_with_whisper_segments(ctx, &audio_data) {
+        match transcribe_with_whisper_segments(ctx, &audio_data, language.as_deref()) {
             Ok(result) => Ok(result),
             Err(e) => Err(format!("Transcription failed: {}", e))
         }
@@ -456,7 +464,7 @@ fn mix_audio_streams(mic_data: &[f32], system_data: &[f32], mic_gain: f32, syste
     mixed
 }
 
-fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<String, String> {
+fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32], language: Option<&str>) -> Result<String, String> {
     use whisper_rs::{FullParams, SamplingStrategy};
     
     let _duration = audio_data.len() as f32 / 16000.0;
@@ -476,7 +484,10 @@ fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<S
     // Configure parameters for better transcription
     params.set_n_threads(4); // Use 4 threads for faster processing
     params.set_translate(false); // Don't translate, keep original language
-    params.set_language(Some("en")); // Set to English (can be made configurable)
+    
+    // Set language parameter - use provided language or auto-detect
+    params.set_language(language);
+    
     params.set_print_progress(false); // Don't print progress to console
     params.set_print_realtime(false); // Don't print realtime output
     params.set_print_timestamps(false); // Don't print timestamps
@@ -520,7 +531,7 @@ fn transcribe_with_whisper(ctx: &WhisperContext, audio_data: &[f32]) -> Result<S
     }
 }
 
-fn transcribe_with_whisper_segments(ctx: &WhisperContext, audio_data: &[f32]) -> Result<TranscriptionResult, String> {
+fn transcribe_with_whisper_segments(ctx: &WhisperContext, audio_data: &[f32], language: Option<&str>) -> Result<TranscriptionResult, String> {
     use whisper_rs::{FullParams, SamplingStrategy};
     
     let _duration = audio_data.len() as f32 / 16000.0;
@@ -543,7 +554,10 @@ fn transcribe_with_whisper_segments(ctx: &WhisperContext, audio_data: &[f32]) ->
     // Configure parameters for better transcription
     params.set_n_threads(4); // Use 4 threads for faster processing
     params.set_translate(false); // Don't translate, keep original language
-    params.set_language(Some("en")); // Set to English (can be made configurable)
+    
+    // Set language parameter - use provided language or auto-detect
+    params.set_language(language);
+    
     params.set_print_progress(false); // Don't print progress to console
     params.set_print_realtime(false); // Don't print realtime output
     params.set_print_timestamps(false); // Don't print timestamps to console
@@ -1144,7 +1158,7 @@ fn start_audio_capture_with_realtime(
                     thread::spawn(move || {
                         if let Ok(ctx_guard) = whisper_ctx.lock() {
                             if let Some(ref ctx) = *ctx_guard {
-                                match transcribe_with_whisper(ctx, &chunk) {
+                                match transcribe_with_whisper(ctx, &chunk, None) {
                                     Ok(transcript) => {
                                         println!("Real-time transcript: {}", transcript);
                                         // Send to frontend via event

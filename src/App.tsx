@@ -5,6 +5,33 @@ import TranscriptionSegments, { TranscriptionResult } from './components/Transcr
 import "./App.css";
 
 function App() {
+  // Supported languages for Whisper transcription
+  const supportedLanguages = [
+    { code: 'en', name: 'English' },
+    { code: 'id', name: 'Indonesian (Bahasa Indonesia)' },
+    { code: 'es', name: 'Spanish (Español)' },
+    { code: 'fr', name: 'French (Français)' },
+    { code: 'de', name: 'German (Deutsch)' },
+    { code: 'it', name: 'Italian (Italiano)' },
+    { code: 'pt', name: 'Portuguese (Português)' },
+    { code: 'ru', name: 'Russian (Русский)' },
+    { code: 'ja', name: 'Japanese (日本語)' },
+    { code: 'ko', name: 'Korean (한국어)' },
+    { code: 'zh', name: 'Chinese (中文)' },
+    { code: 'ar', name: 'Arabic (العربية)' },
+    { code: 'hi', name: 'Hindi (हिन्दी)' },
+    { code: 'th', name: 'Thai (ไทย)' },
+    { code: 'vi', name: 'Vietnamese (Tiếng Việt)' },
+    { code: 'nl', name: 'Dutch (Nederlands)' },
+    { code: 'pl', name: 'Polish (Polski)' },
+    { code: 'tr', name: 'Turkish (Türkçe)' },
+    { code: 'sv', name: 'Swedish (Svenska)' },
+    { code: 'da', name: 'Danish (Dansk)' },
+    { code: 'no', name: 'Norwegian (Norsk)' },
+    { code: 'fi', name: 'Finnish (Suomi)' },
+    { code: 'auto', name: 'Auto-detect' }
+  ];
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [transcript, setTranscript] = useState("");
@@ -22,6 +49,7 @@ function App() {
   const [micGain, setMicGain] = useState(2.5);
   const [systemGain, setSystemGain] = useState(1.5);
   const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
+  const [selectedLanguage, setSelectedLanguage] = useState('en'); // Default to English
   
   // Audio device selection state
   interface AudioDevice {
@@ -263,7 +291,12 @@ function App() {
       setTranscript("Processing audio file...");
       setTranscriptionResult(null);
       
-      const result = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { audioPath: lastRecordingPath });
+      // Pass language parameter to backend
+      const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+      const result = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { 
+        audioPath: lastRecordingPath,
+        language: languageParam 
+      });
       console.log("Transcription result:", result);
       
       setTranscript(result.full_text);
@@ -741,6 +774,62 @@ function App() {
                           </p>
                           <p className="text-xs text-yellow-600 mt-2">
                             💡 Set OPENAI_API_KEY in your .env file
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Language Selection */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-gray-800">🌍 Transcription Language</h4>
+                  <div className="space-y-2">
+                    <label htmlFor="language-select" className="block text-sm font-medium text-gray-700">
+                      Select Language for Transcription:
+                    </label>
+                    <select
+                      id="language-select"
+                      value={selectedLanguage}
+                      onChange={(e) => setSelectedLanguage(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    >
+                      {supportedLanguages.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-xs text-gray-500 mt-1">
+                      💡 Choose "Auto-detect" to let Whisper automatically identify the language, or select a specific language for better accuracy.
+                    </div>
+                  </div>
+                  
+                  {selectedLanguage === 'id' && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="text-green-600 text-lg">🇮🇩</span>
+                        <div>
+                          <h5 className="font-medium text-green-900">Indonesian Language Support</h5>
+                          <p className="text-sm text-green-700 mt-1">
+                            Optimized for Indonesian (Bahasa Indonesia) transcription. Works best with multilingual Whisper models.
+                          </p>
+                          <p className="text-xs text-green-600 mt-2">
+                            💡 Recommended models: Large V3, Medium, or Small (avoid Turbo for best accuracy)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedLanguage === 'auto' && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="text-blue-600 text-lg">🔍</span>
+                        <div>
+                          <h5 className="font-medium text-blue-900">Auto-detect Language</h5>
+                          <p className="text-sm text-blue-700 mt-1">
+                            Whisper will automatically detect the spoken language. This works well for most languages but may be less accurate than specifying the exact language.
                           </p>
                         </div>
                       </div>

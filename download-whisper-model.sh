@@ -13,16 +13,23 @@ mkdir -p "$MODELS_DIR"
 echo "📁 Models directory: $MODELS_DIR"
 
 # Model options (using arrays for compatibility)
-MODEL_KEYS=("large-v3-turbo" "small.en" "medium.en" "base.en")
-MODEL_URLS=("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin" 
+# Prioritizing multilingual models for Indonesian support
+MODEL_KEYS=("large-v3" "medium" "small" "large-v3-turbo" "small.en" "medium.en" "base.en")
+MODEL_URLS=("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+           "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+           "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+           "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin" 
            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin"
            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")
-MODEL_DESCRIPTIONS=("⚡ Large V3 Turbo (RECOMMENDED: Best accuracy + speed)"
-                    "🎯 Small English (Good upgrade from base)"
-                    "🏆 Medium English (High accuracy)"
-                    "📦 Base English (Fallback option)")
-MODEL_SIZES=("1.5GB" "466MB" "1.5GB" "142MB")
+MODEL_DESCRIPTIONS=("🌍 Large V3 Multilingual (RECOMMENDED: Best for Indonesian)"
+                    "🌍 Medium Multilingual (Good balance for Indonesian)"
+                    "🌍 Small Multilingual (Faster, good for Indonesian)"
+                    "⚡ Large V3 Turbo (English only - may hallucinate on Indonesian)"
+                    "🎯 Small English (English only)"
+                    "🏆 Medium English (English only)"
+                    "📦 Base English (English only)")
+MODEL_SIZES=("3.1GB" "1.5GB" "466MB" "1.5GB" "466MB" "1.5GB" "142MB")
 
 # Function to download a model
 download_model() {
@@ -96,20 +103,29 @@ else
     echo ""
     echo "🤔 No Whisper models found. Please choose which model to download:"
     echo ""
-    echo "1) large-v3-turbo (RECOMMENDED) - Best accuracy + speed (1.5GB)"
-    echo "2) small.en - Good upgrade from base (466MB)"
-    echo "3) medium.en - High accuracy (1.5GB)"
-    echo "4) base.en - Fallback option (142MB)"
-    echo "5) Download all models"
+    echo "FOR INDONESIAN SUPPORT (RECOMMENDED):"
+    echo "1) large-v3 (BEST) - Best accuracy for Indonesian (3.1GB)"
+    echo "2) medium - Good balance for Indonesian (1.5GB)"
+    echo "3) small - Faster, good for Indonesian (466MB)"
     echo ""
-    read -p "Enter your choice (1-5): " choice
+    echo "FOR ENGLISH ONLY:"
+    echo "4) large-v3-turbo - Fast but may hallucinate on Indonesian (1.5GB)"
+    echo "5) small.en - English only (466MB)"
+    echo "6) medium.en - English only (1.5GB)"
+    echo "7) base.en - English only (142MB)"
+    echo "8) Download all models"
+    echo ""
+    read -p "Enter your choice (1-8): " choice
     
     case $choice in
-        1) MODEL_CHOICE="large-v3-turbo" ;;
-        2) MODEL_CHOICE="small.en" ;;
-        3) MODEL_CHOICE="medium.en" ;;
-        4) MODEL_CHOICE="base.en" ;;
-        5) MODEL_CHOICE="all" ;;
+        1) MODEL_CHOICE="large-v3" ;;
+        2) MODEL_CHOICE="medium" ;;
+        3) MODEL_CHOICE="small" ;;
+        4) MODEL_CHOICE="large-v3-turbo" ;;
+        5) MODEL_CHOICE="small.en" ;;
+        6) MODEL_CHOICE="medium.en" ;;
+        7) MODEL_CHOICE="base.en" ;;
+        8) MODEL_CHOICE="all" ;;
         *) echo "❌ Invalid choice. Exiting."; exit 1 ;;
     esac
 fi
