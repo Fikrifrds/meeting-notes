@@ -625,24 +625,6 @@ const MeetingsManager: React.FC = () => {
                       )}
                       <button className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-                        </svg>
-                        Share
-                      </button>
-                      <button className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                        Summary
-                      </button>
-                      <button className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        Edit
-                      </button>
-                      <button className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Export
@@ -678,31 +660,42 @@ const MeetingsManager: React.FC = () => {
                     </div>
 
                     {/* Tab Content */}
-                    <div className="mt-6">
+                    <div className="mt-4">
                       {activeTab === 'overview' && (
-                        <div className="space-y-6">
+                        <div className="space-y-4">
                           {/* AI-Generated Summary */}
-                          <div className="bg-gradient-to-br from-purple-500 to-blue-600 rounded-2xl p-6 text-white">
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="rounded-2xl p-4 text-black bg-white">
+                            <div className="flex items-center gap-3 mb-3">
+                              <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                                 </svg>
                               </div>
-                              <h3 className="text-xl font-semibold">🤖 AI-Generated Summary</h3>
+                              <h3 className="text-xl font-semibold">AI-Generated Summary</h3>
                             </div>
                             
                             {selectedMeeting.meeting_minutes ? (
-                              <div className="space-y-4">
-                                <p className="text-white/90 leading-relaxed">
-                                  {selectedMeeting.meeting_minutes}
-                                </p>
+                              <div className="space-y-3">
+                                <div 
+                                  className="text-gray-800 leading-normal prose max-w-none"
+                                  dangerouslySetInnerHTML={{
+                                    __html: selectedMeeting.meeting_minutes
+                                      ?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                      ?.replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                      ?.replace(/^### (.*$)/gm, '<h3 class="text-lg font-semibold mt-2 mb-1">$1</h3>')
+                                      ?.replace(/^## (.*$)/gm, '<h2 class="text-xl font-bold mt-3 mb-2">$1</h2>')
+                                      ?.replace(/^# (.*$)/gm, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>')
+                                      ?.replace(/^- (.*$)/gm, '<li class="ml-4">$1</li>')
+                                      ?.replace(/(<li.*?>.*?<\/li>)/gs, '<ul class="list-disc list-inside space-y-0.5 my-1">$1</ul>')
+                                      ?.replace(/\n/g, '<br>')
+                                  }}
+                                />
                                 
-                                <div className="space-y-3">
-                                  <h4 className="font-semibold text-lg">Key Topics:</h4>
+                                <div className="space-y-2">
+                                  <h4 className="font-semibold text-base">Key Topics:</h4>
                                   <div className="flex flex-wrap gap-2">
                                     {['API Development', 'Mobile App', 'Progress Tracking'].map((topic) => (
-                                      <span key={topic} className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">
+                                      <span key={topic} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
                                         {topic}
                                       </span>
                                     ))}
@@ -715,7 +708,7 @@ const MeetingsManager: React.FC = () => {
                                         😊 <span className="font-medium">Positive</span>
                                       </span>
                                     </span>
-                                    <span className="text-white/60">|</span>
+                                    <span className="text-gray-400">|</span>
                                     <span className="flex items-center gap-2">
                                       <span>Energy:</span>
                                       <span className="font-medium">High</span>
@@ -724,14 +717,14 @@ const MeetingsManager: React.FC = () => {
                                 </div>
                               </div>
                             ) : (
-                              <div className="text-center py-8">
-                                <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                                  <svg className="w-8 h-8 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <div className="text-center py-6">
+                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                                   </svg>
                                 </div>
-                                <p className="text-white/80">No AI summary available yet</p>
-                                <p className="text-white/60 text-sm mt-2">Summary will be generated after transcription</p>
+                                <p className="text-gray-600">No AI summary available yet</p>
+                                <p className="text-gray-500 text-sm mt-1">Summary will be generated after transcription</p>
                               </div>
                             )}
                           </div>
@@ -739,10 +732,10 @@ const MeetingsManager: React.FC = () => {
                       )}
 
                       {activeTab === 'audio' && (
-                        <div className="space-y-6">
+                        <div className="space-y-4">
                           {/* Audio Player */}
-                          <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-2xl p-6 border border-blue-200">
-                            <div className="flex items-center gap-3 mb-4">
+                          <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-2xl p-4 border border-blue-200">
+                            <div className="flex items-center gap-3 mb-3">
                               <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
                                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
@@ -753,13 +746,13 @@ const MeetingsManager: React.FC = () => {
                             </div>
 
                             {selectedMeeting.audio_file_path ? (
-                              <div className="space-y-4">
+                              <div className="space-y-3">
                                 <div className="text-sm text-gray-600 bg-white/50 rounded-lg p-3">
                                   <span className="font-medium">File:</span> {selectedMeeting.audio_file_path}
                                 </div>
 
                                 {audioDataUrl && (
-                                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                                  <div className="bg-white rounded-xl p-3 shadow-sm">
                                     <audio
                                       ref={audioRef}
                                       src={audioDataUrl}
@@ -827,14 +820,14 @@ const MeetingsManager: React.FC = () => {
                                 )}
                               </div>
                             ) : (
-                              <div className="text-center py-8">
-                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <div className="text-center py-6">
+                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                                   </svg>
                                 </div>
                                 <p className="text-gray-600 font-medium">No audio recording available</p>
-                                <p className="text-gray-500 text-sm mt-2">Audio will appear here after recording</p>
+                                <p className="text-gray-500 text-sm mt-1">Audio will appear here after recording</p>
                               </div>
                             )}
                           </div>
@@ -842,10 +835,10 @@ const MeetingsManager: React.FC = () => {
                       )}
 
                       {activeTab === 'transcript' && (
-                        <div className="space-y-6">
+                        <div className="space-y-4">
                           {selectedMeeting.transcript ? (
-                            <div className="bg-gray-50 rounded-xl p-6">
-                              <h3 className="text-lg font-semibold text-gray-800 mb-4">📝 Full Transcript</h3>
+                            <div className="bg-gray-50 rounded-xl p-4">
+                              <h3 className="text-lg font-semibold text-gray-800 mb-3">📝 Full Transcript</h3>
                               <div className="prose max-w-none">
                                 <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
                                   {selectedMeeting.transcript}
@@ -853,14 +846,14 @@ const MeetingsManager: React.FC = () => {
                               </div>
                             </div>
                           ) : (
-                            <div className="text-center py-12">
-                              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div className="text-center py-8">
+                              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
                               </div>
                               <p className="text-gray-600 font-medium">No transcript available</p>
-                              <p className="text-gray-500 text-sm mt-2">Transcript will appear here after processing</p>
+                              <p className="text-gray-500 text-sm mt-1">Transcript will appear here after processing</p>
                             </div>
                           )}
 
