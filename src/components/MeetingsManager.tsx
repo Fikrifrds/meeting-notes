@@ -80,6 +80,10 @@ const MeetingsManager: React.FC = () => {
   });
   const [isExporting, setIsExporting] = useState(false);
 
+  // AI generation state
+  const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
+  const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
+
   // Audio player state
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -456,6 +460,59 @@ const MeetingsManager: React.FC = () => {
       setParsedMetadata(null);
     }
   }, [selectedMeeting?.meeting_minutes]);
+
+  // Generate or regenerate meeting minutes
+  const generateMeetingMinutes = async () => {
+    if (!selectedMeeting) {
+      setError('No meeting selected');
+      return;
+    }
+
+    if (!selectedMeeting.transcript?.trim()) {
+      setError('No transcript available to generate meeting minutes. Please transcribe audio first.');
+      return;
+    }
+
+    try {
+      setError(null);
+      setIsGeneratingMinutes(true);
+      
+      const command = aiProvider === 'ollama' ? 'generate_meeting_minutes_ollama' : 'generate_meeting_minutes';
+      const languageParam = selectedMeeting.language === 'auto' ? null : selectedMeeting.language;
+      
+      const result = await invoke<string>(command, { 
+        transcript: selectedMeeting.transcript,
+        language: languageParam 
+      });
+      
+      // Save the generated minutes to database
+      await invoke('save_meeting_minutes_to_database', {
+        meetingId: selectedMeeting.id,
+        meetingMinutes: result,
+        aiProvider: aiProvider
+      });
+      
+      // Update the selected meeting with new minutes
+      const updatedMeeting = { ...selectedMeeting, meeting_minutes: result, ai_provider: aiProvider };
+      setSelectedMeeting(updatedMeeting);
+      
+      // Update the meetings list
+      setMeetings(prev => prev.map(m => 
+        m.id === selectedMeeting.id ? updatedMeeting : m
+      ));
+      
+      setError(`✅ Meeting minutes generated successfully with ${aiProvider.toUpperCase()}!`);
+      
+      // Auto-hide success message after 3 seconds
+      setTimeout(() => setError(null), 3000);
+      
+    } catch (error) {
+      console.error('Failed to generate meeting minutes:', error);
+      setError(`Failed to generate meeting minutes with ${aiProvider.toUpperCase()}: ${error}`);
+    } finally {
+      setIsGeneratingMinutes(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
@@ -863,14 +920,13 @@ ENERGY: High`;
                               )}
                             </button>
                             <div className="flex-1">
-                              <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-                                <span className="font-medium">{formatTime(currentTime)}</span>
-                                <span className="font-medium">{formatTime(duration)}</span>
-                              </div>
-                              <div className="relative">
-                                <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm font-medium text-gray-700">
+                                  {formatTime(currentTime)}
+                                </span>
+                                <div className="flex-1 bg-gray-200 rounded-full h-2">
                                   <div 
-                                    className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-150 ease-out"
+                                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                                     style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                                   ></div>
                                 </div>
@@ -934,11 +990,71 @@ ENERGY: High`;
                         <div className="space-y-4">
                           {/* AI-Generated Summary */}
                           <div className="rounded-2xl p-4 text-black bg-white">
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                                <Lightbulb className="w-5 h-5 text-purple-600" />
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                                  <Lightbulb className="w-5 h-5 text-purple-600" />
+                                </div>
+                                <h3 className="text-xl font-semibold">AI-Generated Summary</h3>
                               </div>
-                              <h3 className="text-xl font-semibold">AI-Generated Summary</h3>
+                              
+                              {/* Generate/Regenerate Button */}
+                              <div className="flex items-center gap-3">
+                                {/* AI Provider Selection */}
+                                <div className="flex items-center gap-2 text-sm">
+                                  <label className="flex items-center gap-1">
+                                    <input
+                                      type="radio"
+                                      name="aiProvider"
+                                      value="ollama"
+                                      checked={aiProvider === 'ollama'}
+                                      onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
+                                      className="text-purple-600 focus:ring-purple-500"
+                                    />
+                                    <span className="text-gray-600">Ollama</span>
+                                  </label>
+                                  <label className="flex items-center gap-1">
+                                    <input
+                                      type="radio"
+                                      name="aiProvider"
+                                      value="openai"
+                                      checked={aiProvider === 'openai'}
+                                      onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
+                                      className="text-purple-600 focus:ring-purple-500"
+                                    />
+                                    <span className="text-gray-600">OpenAI</span>
+                                  </label>
+                                </div>
+                                
+                                <button
+                                  onClick={generateMeetingMinutes}
+                                  disabled={isGeneratingMinutes || !selectedMeeting?.transcript}
+                                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-colors ${
+                                    isGeneratingMinutes || !selectedMeeting?.transcript
+                                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                      : selectedMeeting.meeting_minutes
+                                        ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                                        : 'bg-purple-500 hover:bg-purple-600 text-white'
+                                  }`}
+                                >
+                                  {isGeneratingMinutes ? (
+                                    <>
+                                      <Loader className="w-4 h-4 animate-spin" />
+                                      Generating...
+                                    </>
+                                  ) : selectedMeeting?.meeting_minutes ? (
+                                    <>
+                                      <Bot className="w-4 h-4" />
+                                      Regenerate
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Bot className="w-4 h-4" />
+                                      Generate
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             
                             {selectedMeeting.meeting_minutes ? (

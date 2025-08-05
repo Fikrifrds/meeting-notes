@@ -127,6 +127,14 @@ impl Database {
         println!("   audio_file_path: {:?}", meeting.audio_file_path);
         println!("   duration_seconds: {:?}", meeting.duration_seconds);
         
+        // First, let's check what's currently in the database
+        let current_audio_path: Option<String> = self.conn.query_row(
+            "SELECT audio_file_path FROM meetings WHERE id = ?1",
+            params![meeting.id],
+            |row| row.get(0)
+        ).unwrap_or(None);
+        println!("🔍 DEBUG: Current audio_file_path in DB before update: {:?}", current_audio_path);
+        
         let rows_affected = self.conn.execute(
             "UPDATE meetings SET 
                 title = ?1,
@@ -152,6 +160,15 @@ impl Database {
         )?;
 
         println!("✅ Database update completed, rows affected: {}", rows_affected);
+        
+        // Check what's in the database after the update
+        let updated_audio_path: Option<String> = self.conn.query_row(
+            "SELECT audio_file_path FROM meetings WHERE id = ?1",
+            params![meeting.id],
+            |row| row.get(0)
+        ).unwrap_or(None);
+        println!("🔍 DEBUG: Audio_file_path in DB after update: {:?}", updated_audio_path);
+        
         Ok(())
     }
 
@@ -241,6 +258,14 @@ impl Database {
             ],
         )?;
 
+        Ok(())
+    }
+
+    pub fn delete_meeting_segments(&self, meeting_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM meeting_segments WHERE meeting_id = ?1",
+            [meeting_id],
+        )?;
         Ok(())
     }
 

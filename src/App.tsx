@@ -261,6 +261,13 @@ function App() {
     }
   };
 
+  // Define the StartRecordingResult interface to match the new response
+  interface StartRecordingResult {
+    message: string;
+    meeting_id: string;
+    audio_file_path: string;
+  }
+
   const startRecording = async () => {
     try {
       clearError();
@@ -271,8 +278,15 @@ function App() {
       setMeetingMinutes("");
       setCurrentMeetingId(null); // Clear previous meeting ID
       
-      const result = await invoke("start_recording");
+      const result = await invoke<StartRecordingResult>("start_recording");
       console.log("Recording started:", result);
+      
+      // Store the meeting ID and audio file path from the start
+      setCurrentMeetingId(result.meeting_id);
+      setLastRecordingPath(result.audio_file_path);
+      
+      console.log("Meeting created with ID:", result.meeting_id);
+      console.log("Audio will be saved to:", result.audio_file_path);
       
     } catch (error) {
       console.error("Failed to start recording:", error);
@@ -307,31 +321,7 @@ function App() {
           await autoTranscribeAndSave(result.audio_file_path);
         } catch (autoSaveError) {
           console.error("Auto-transcribe and save failed:", autoSaveError);
-          
-          // Fallback: Save meeting with audio path only (no transcription)
-          try {
-            const currentDate = new Date();
-            const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
-            const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
-            
-            const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
-              title: meetingTitle,
-              transcript: "Recording completed - transcription pending",
-              segments: [],
-              language: languageParam,
-              audio_file_path: result.audio_file_path
-            });
-            
-            if (savedMeeting && savedMeeting.id) {
-              setCurrentMeetingId(savedMeeting.id);
-            }
-            
-            console.log("Meeting saved with audio path as fallback:", savedMeeting);
-            showError(`⚠️ Auto-transcription failed, but meeting saved with audio file. You can transcribe manually later.`);
-          } catch (fallbackError) {
-            console.error("Fallback save also failed:", fallbackError);
-            showError(`Recording saved but failed to save to database: ${fallbackError}`);
-          }
+          showError(`⚠️ Auto-transcription failed, but meeting was already created with ID: ${currentMeetingId}. You can transcribe manually later.`);
         }
       } else {
         showError(`Recording stopped but no audio file was saved: ${result.message}`);
@@ -346,8 +336,12 @@ function App() {
 
   // Auto-transcribe and save to database
   const autoTranscribeAndSave = async (audioPath: string) => {
-    const currentDate = new Date();
-    const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
+    if (!currentMeetingId) {
+      console.error("No meeting ID available for saving transcript");
+      showError("No meeting ID available. Please start a new recording.");
+      return;
+    }
+
     const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
     
     try {
@@ -363,19 +357,15 @@ function App() {
       setTranscript(transcriptionResult.full_text);
       setTranscriptionResult(transcriptionResult);
       
-      // Auto-save transcript to database with audio path
-      const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
-         title: meetingTitle,
+      // Update the existing meeting with transcript and audio path
+      const savedMeeting = await invoke<{id: string}>("update_meeting_transcript", {
+         meetingId: currentMeetingId,
+         title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
          transcript: transcriptionResult.full_text,
          segments: transcriptionResult.segments,
          language: languageParam,
-         audio_file_path: audioPath
+         audioFilePath: audioPath
        });
-       
-       // Store the meeting ID for later use
-       if (savedMeeting && savedMeeting.id) {
-         setCurrentMeetingId(savedMeeting.id);
-       }
        
        console.log("Transcript auto-saved to database:", savedMeeting);
        showError("✅ Recording transcribed and saved to database automatically!");
@@ -383,25 +373,22 @@ function App() {
     } catch (error) {
       console.error("Auto-transcription failed:", error);
       
-      // Even if transcription fails, save the meeting with audio path
+      // Even if transcription fails, update the meeting with audio path
       try {
-        const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
-          title: meetingTitle,
+        const savedMeeting = await invoke<{id: string}>("update_meeting_transcript", {
+          meetingId: currentMeetingId,
+          title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
           transcript: "Transcription failed - audio file available",
           segments: [],
           language: languageParam,
-          audio_file_path: audioPath
+          audioFilePath: audioPath
         });
         
-        if (savedMeeting && savedMeeting.id) {
-          setCurrentMeetingId(savedMeeting.id);
-        }
-        
-        console.log("Meeting saved with audio path despite transcription failure:", savedMeeting);
+        console.log("Meeting updated with audio path despite transcription failure:", savedMeeting);
         showError(`⚠️ Transcription failed, but meeting saved with audio file: ${error}`);
       } catch (saveError) {
-        console.error("Failed to save meeting with audio path:", saveError);
-        showError(`Auto-transcription failed: ${error}. Also failed to save meeting: ${saveError}`);
+        console.error("Failed to update meeting with audio path:", saveError);
+        showError(`Auto-transcription failed: ${error}. Also failed to update meeting: ${saveError}`);
       }
     } finally {
       setIsTranscribing(false);

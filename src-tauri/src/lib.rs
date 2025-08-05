@@ -756,7 +756,11 @@ fn load_audio_file(path: &str) -> Result<Vec<f32>, String> {
 }
 
 #[tauri::command]
-async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) -> Result<String, String> {
+async fn start_recording(
+    state: State<'_, AudioState>, 
+    db_state: State<'_, DatabaseState>,
+    app_handle: AppHandle
+) -> Result<serde_json::Value, String> {
     let mut is_recording = state.is_recording.lock().map_err(|e| e.to_string())?;
     let mut start_time = state.start_time.lock().map_err(|e| e.to_string())?;
     let mut output_path = state.output_path.lock().map_err(|e| e.to_string())?;
@@ -766,13 +770,25 @@ async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) ->
         return Err("Already recording".to_string());
     }
     
-    // Set up output path
+    // Create a meeting first to get the ID
+    db_state.initialize().ok();
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    
+    let current_date = chrono::Local::now();
+    let meeting_title = format!("Meeting {}", current_date.format("%Y-%m-%d %H:%M:%S"));
+    
+    let meeting = db.create_meeting(meeting_title, None)
+        .map_err(|e| format!("Failed to create meeting: {}", e))?;
+    
+    println!("✅ Created meeting with ID: {}", meeting.id);
+    
+    // Set up output path using meeting ID
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let recordings_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
     std::fs::create_dir_all(&recordings_dir).map_err(|e| e.to_string())?;
     
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let file_path = recordings_dir.join(format!("recording_{}.wav", timestamp));
+    let file_path = recordings_dir.join(format!("recording_{}.wav", meeting.id));
     
     *output_path = Some(file_path.clone());
     *start_time = Some(chrono::Utc::now());
@@ -815,7 +831,14 @@ async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) ->
         }
     });
     
-    Ok(format!("Recording started: {}", file_path.display()))
+    // Return both the message and meeting info
+    let result = serde_json::json!({
+        "message": format!("Recording started: {}", file_path.display()),
+        "meeting_id": meeting.id,
+        "audio_file_path": file_path.to_string_lossy().to_string()
+    });
+    
+    Ok(result)
 }
 
 fn start_audio_capture_with_realtime(
@@ -1961,6 +1984,29 @@ async fn create_meeting(
 }
 
 #[tauri::command]
+async fn test_save_audio_path(
+    db_state: State<'_, DatabaseState>
+) -> Result<String, String> {
+    let test_audio_path = "/Users/test/audio.wav";
+    let test_title = "Test Meeting";
+    
+    println!("🧪 Testing save_transcript_to_database with audio path: {}", test_audio_path);
+    
+    let result = save_transcript_to_database(
+        db_state,
+        test_title.to_string(),
+        "Test transcript".to_string(),
+        vec![],
+        None,
+        Some(test_audio_path.to_string())
+    ).await?;
+    
+    println!("🧪 Test result - Meeting ID: {}, Audio Path: {:?}", result.id, result.audio_file_path);
+    
+    Ok(format!("Test completed. Meeting ID: {}, Audio Path: {:?}", result.id, result.audio_file_path))
+}
+
+#[tauri::command]
 async fn update_meeting(
     db_state: State<'_, DatabaseState>,
     meeting: Meeting
@@ -1998,6 +2044,87 @@ async fn update_meeting_title(
         .map_err(|e| format!("Failed to update meeting title: {}", e))?;
     
     Ok("Meeting title updated successfully".to_string())
+}
+
+#[tauri::command]
+async fn update_meeting_transcript(
+    db_state: State<'_, DatabaseState>,
+    meeting_id: String,
+    title: String,
+    transcript: String,
+    segments: Vec<TranscriptionSegment>,
+    language: Option<String>,
+    audio_file_path: Option<String>
+) -> Result<Meeting, String> {
+    // Debug logging
+    println!("🔍 update_meeting_transcript called with:");
+    println!("   meeting_id: {}", meeting_id);
+    println!("   title: {}", title);
+    println!("   transcript length: {}", transcript.len());
+    println!("   segments count: {}", segments.len());
+    println!("   language: {:?}", language);
+    println!("   audio_file_path: {:?}", audio_file_path);
+    
+    // Initialize database if not already done
+    db_state.initialize().ok();
+    
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref()
+        .ok_or("Database not initialized")?;
+    
+    // Get the existing meeting
+    let mut meeting = db.get_meeting(&meeting_id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?
+        .ok_or("Meeting not found")?;
+    
+    // Calculate duration from segments or audio file
+    let duration_seconds = if !segments.is_empty() {
+        // Use the end time of the last segment as total duration
+        segments.iter().map(|s| s.end as i64).max().unwrap_or(0)
+    } else if let Some(ref audio_path) = audio_file_path {
+        // Try to get duration from audio file
+        calculate_audio_duration(audio_path).unwrap_or(0)
+    } else {
+        0
+    };
+    
+    // Update meeting with transcript, audio file path, and duration
+    meeting.title = title;
+    meeting.transcript = Some(transcript);
+    meeting.audio_file_path = audio_file_path.clone();
+    meeting.duration_seconds = Some(duration_seconds);
+    meeting.language = language;
+    
+    println!("🔍 Before update_meeting:");
+    println!("   meeting.id: {}", meeting.id);
+    println!("   meeting.audio_file_path: {:?}", meeting.audio_file_path);
+    println!("   meeting.duration_seconds: {:?}", meeting.duration_seconds);
+    
+    db.update_meeting(&meeting)
+        .map_err(|e| format!("Failed to update meeting with transcript: {}", e))?;
+    
+    println!("✅ Meeting updated successfully");
+    
+    // Clear existing segments and add new ones
+    db.delete_meeting_segments(&meeting_id)
+        .map_err(|e| format!("Failed to delete existing segments: {}", e))?;
+    
+    // Add new segments to the meeting
+    for segment in segments {
+        let meeting_segment = MeetingSegment {
+            id: uuid::Uuid::new_v4().to_string(),
+            meeting_id: meeting.id.clone(),
+            start_time: segment.start as f64,
+            end_time: segment.end as f64,
+            text: segment.text,
+            confidence: None,
+        };
+        
+        db.add_meeting_segment(&meeting_segment)
+            .map_err(|e| format!("Failed to add meeting segment: {}", e))?;
+    }
+    
+    Ok(meeting)
 }
 
 #[tauri::command]
@@ -2738,12 +2865,14 @@ pub fn run() {
             add_meeting_segment,
             get_meeting_segments,
             save_transcript_to_database,
+            update_meeting_transcript,
             save_meeting_minutes_to_database,
             get_audio_file_data,
             get_audio_quality_info,
             export_meeting_data,
             debug_meeting_audio_paths,
             update_audio_file_paths,
+            test_save_audio_path,
             greet
         ])
         .run(tauri::generate_context!())
