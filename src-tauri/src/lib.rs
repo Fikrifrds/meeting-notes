@@ -2263,10 +2263,35 @@ async fn delete_meeting(
     let db = db_guard.as_ref()
         .ok_or("Database not initialized")?;
     
+    // First, get the meeting to retrieve the audio file path
+    let meeting = db.get_meeting(&id)
+        .map_err(|e| format!("Failed to get meeting: {}", e))?;
+    
+    if let Some(meeting) = meeting {
+        // Delete the audio file if it exists
+        if let Some(audio_file_path) = &meeting.audio_file_path {
+            if !audio_file_path.is_empty() {
+                let audio_path = std::path::Path::new(audio_file_path);
+                if audio_path.exists() {
+                    match std::fs::remove_file(audio_path) {
+                        Ok(_) => println!("✅ Deleted audio file: {}", audio_file_path),
+                        Err(e) => {
+                            // Log the error but don't fail the entire operation
+                            println!("⚠️ Failed to delete audio file {}: {}", audio_file_path, e);
+                        }
+                    }
+                } else {
+                    println!("ℹ️ Audio file not found: {}", audio_file_path);
+                }
+            }
+        }
+    }
+    
+    // Delete the meeting from the database
     db.delete_meeting(&id)
         .map_err(|e| format!("Failed to delete meeting: {}", e))?;
     
-    Ok("Meeting deleted successfully".to_string())
+    Ok("Meeting and associated files deleted successfully".to_string())
 }
 
 #[tauri::command]

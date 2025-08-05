@@ -84,6 +84,10 @@ const MeetingsManager: React.FC = () => {
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
 
+  // Delete confirmation modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [meetingToDelete, setMeetingToDelete] = useState<Meeting | null>(null);
+
   // Audio player state
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -153,23 +157,55 @@ const MeetingsManager: React.FC = () => {
   };
 
 
-  const deleteMeeting = async (meetingId: string) => {
-    if (!confirm('Are you sure you want to delete this meeting?')) {
-      return;
+  const deleteMeeting = (meetingId: string) => {
+    console.log('🗑️ Delete button clicked for meeting:', meetingId);
+    
+    // Find the meeting to show in the confirmation modal
+    const meeting = meetings.find(m => m.id === meetingId);
+    if (meeting) {
+      setMeetingToDelete(meeting);
+      setShowDeleteModal(true);
+      console.log('📋 Showing delete confirmation modal');
     }
+  };
 
+  const confirmDeleteMeeting = async () => {
+    if (!meetingToDelete) return;
+
+    console.log('✅ User confirmed deletion, proceeding...');
+    
     try {
-      await invoke('delete_meeting', { id: meetingId });
-      setMeetings(prev => prev.filter(m => m.id !== meetingId));
-      if (selectedMeeting?.id === meetingId) {
+      console.log('🔄 Calling delete_meeting invoke...');
+      await invoke('delete_meeting', { id: meetingToDelete.id });
+      console.log('✅ Delete invoke successful');
+      
+      setMeetings(prev => prev.filter(m => m.id !== meetingToDelete.id));
+      if (selectedMeeting?.id === meetingToDelete.id) {
         setSelectedMeeting(null);
         setSegments([]);
       }
       setError(null);
+      console.log('✅ UI state updated after deletion');
+      
+      // Show success message
+      setError('✅ Meeting deleted successfully');
+      setTimeout(() => setError(null), 3000);
+      
+      // Close modal
+      setShowDeleteModal(false);
+      setMeetingToDelete(null);
     } catch (error) {
-      console.error('Failed to delete meeting:', error);
+      console.error('❌ Failed to delete meeting:', error);
       setError(`Failed to delete meeting: ${error}`);
+      setShowDeleteModal(false);
+      setMeetingToDelete(null);
     }
+  };
+
+  const cancelDeleteMeeting = () => {
+    console.log('🚫 User cancelled deletion');
+    setShowDeleteModal(false);
+    setMeetingToDelete(null);
   };
 
   const startEditingMeeting = (meeting: Meeting) => {
@@ -1544,6 +1580,98 @@ const MeetingsManager: React.FC = () => {
                     Cancel
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && meetingToDelete && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                  <Trash2 className="w-6 h-6 text-red-500" />
+                  Delete Meeting
+                </h3>
+                <button
+                  onClick={cancelDeleteMeeting}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-2"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <Trash2 className="w-4 h-4 text-red-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-red-900 mb-1">
+                        Are you sure you want to delete "{meetingToDelete.title}"?
+                      </h4>
+                      <p className="text-sm text-red-700">
+                        This action cannot be undone and will permanently delete:
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                      The meeting record and metadata
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                      The audio recording file
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                      All transcripts and segments
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                      AI-generated summaries and minutes
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 text-blue-500 mt-0.5">
+                      <svg viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-blue-900">Meeting Details</p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Created: {formatDate(meetingToDelete.created_at)}<br />
+                        Duration: {formatDuration(meetingToDelete.duration_seconds)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-6">
+                <button
+                  onClick={confirmDeleteMeeting}
+                  className="flex-1 px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete Meeting
+                </button>
+                <button
+                  onClick={cancelDeleteMeeting}
+                  className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors font-medium"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
