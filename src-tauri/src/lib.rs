@@ -1271,8 +1271,17 @@ fn start_audio_capture(
     )
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RecordingResult {
+    pub success: bool,
+    pub message: String,
+    pub audio_file_path: Option<String>,
+    pub duration_seconds: i64,
+    pub sample_count: usize,
+}
+
 #[tauri::command]
-async fn stop_recording(state: State<'_, AudioState>) -> Result<String, String> {
+async fn stop_recording(state: State<'_, AudioState>) -> Result<RecordingResult, String> {
     let mut is_recording = state.is_recording.lock().map_err(|e| e.to_string())?;
     let mut start_time = state.start_time.lock().map_err(|e| e.to_string())?;
     let output_path = state.output_path.lock().map_err(|e| e.to_string())?;
@@ -1317,10 +1326,21 @@ async fn stop_recording(state: State<'_, AudioState>) -> Result<String, String> 
         println!("✅ Recording saved: {} (Duration: {}s, Samples: {})", 
                  path.display(), duration_seconds, recording_data.len());
         
-        Ok(format!("Recording stopped and saved: {} (Duration: {}s)", 
-                   path.display(), duration_seconds))
+        Ok(RecordingResult {
+            success: true,
+            message: format!("Recording stopped and saved successfully (Duration: {}s)", duration_seconds),
+            audio_file_path: Some(path.to_string_lossy().to_string()),
+            duration_seconds,
+            sample_count: recording_data.len(),
+        })
     } else {
-        Ok("Recording stopped".to_string())
+        Ok(RecordingResult {
+            success: false,
+            message: "Recording stopped but no file path available".to_string(),
+            audio_file_path: None,
+            duration_seconds,
+            sample_count: recording_data.len(),
+        })
     }
 }
 
@@ -1989,6 +2009,14 @@ async fn save_transcript_to_database(
     language: Option<String>,
     audio_file_path: Option<String>
 ) -> Result<Meeting, String> {
+    // Debug logging
+    println!("🔍 save_transcript_to_database called with:");
+    println!("   title: {}", title);
+    println!("   transcript length: {}", transcript.len());
+    println!("   segments count: {}", segments.len());
+    println!("   language: {:?}", language);
+    println!("   audio_file_path: {:?}", audio_file_path);
+    
     // Initialize database if not already done
     db_state.initialize().ok();
     
@@ -2013,10 +2041,18 @@ async fn save_transcript_to_database(
     
     // Update meeting with transcript, audio file path, and duration
     meeting.transcript = Some(transcript);
-    meeting.audio_file_path = audio_file_path;
+    meeting.audio_file_path = audio_file_path.clone();
     meeting.duration_seconds = Some(duration_seconds);
+    
+    println!("🔍 Before update_meeting:");
+    println!("   meeting.id: {}", meeting.id);
+    println!("   meeting.audio_file_path: {:?}", meeting.audio_file_path);
+    println!("   meeting.duration_seconds: {:?}", meeting.duration_seconds);
+    
     db.update_meeting(&meeting)
         .map_err(|e| format!("Failed to update meeting with transcript: {}", e))?;
+    
+    println!("✅ Meeting updated successfully");
     
     // Add segments to the meeting
     for segment in segments {

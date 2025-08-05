@@ -3,9 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { 
   Play, 
   Pause, 
-  SkipBack, 
-  SkipForward, 
-  Volume2, 
   Download, 
   Edit2, 
   Save, 
@@ -20,7 +17,6 @@ import {
   Calendar,
   TrendingUp,
   Heart,
-  Zap,
   Search,
   Plus,
   Trash2,

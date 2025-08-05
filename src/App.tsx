@@ -281,22 +281,30 @@ function App() {
     }
   };
 
+  // Define the RecordingResult interface to match the Rust struct
+  interface RecordingResult {
+    success: boolean;
+    message: string;
+    audio_file_path: string | null;
+    duration_seconds: number;
+    sample_count: number;
+  }
+
   const stopRecording = async () => {
     try {
       clearError();
-      const result = await invoke<string>("stop_recording");
+      const result = await invoke<RecordingResult>("stop_recording");
       console.log("Recording stopped:", result);
       
       setIsRecording(false);
       
-      // Extract file path from result message
-      const pathMatch = result.match(/Recording stopped and saved: (.+?) \(Duration:/);
-      if (pathMatch) {
-        setLastRecordingPath(pathMatch[1]);
+      // Use the structured response instead of parsing a message string
+      if (result.success && result.audio_file_path) {
+        setLastRecordingPath(result.audio_file_path);
         
         try {
           // Auto-transcribe and save to database
-          await autoTranscribeAndSave(pathMatch[1]);
+          await autoTranscribeAndSave(result.audio_file_path);
         } catch (autoSaveError) {
           console.error("Auto-transcribe and save failed:", autoSaveError);
           
@@ -311,7 +319,7 @@ function App() {
               transcript: "Recording completed - transcription pending",
               segments: [],
               language: languageParam,
-              audio_file_path: pathMatch[1]
+              audio_file_path: result.audio_file_path
             });
             
             if (savedMeeting && savedMeeting.id) {
@@ -325,6 +333,8 @@ function App() {
             showError(`Recording saved but failed to save to database: ${fallbackError}`);
           }
         }
+      } else {
+        showError(`Recording stopped but no audio file was saved: ${result.message}`);
       }
       
     } catch (error) {

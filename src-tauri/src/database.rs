@@ -121,7 +121,13 @@ impl Database {
     pub fn update_meeting(&self, meeting: &Meeting) -> Result<()> {
         let updated_at = Local::now();
         
-        self.conn.execute(
+        println!("🔍 Database update_meeting called with:");
+        println!("   id: {}", meeting.id);
+        println!("   title: {}", meeting.title);
+        println!("   audio_file_path: {:?}", meeting.audio_file_path);
+        println!("   duration_seconds: {:?}", meeting.duration_seconds);
+        
+        let rows_affected = self.conn.execute(
             "UPDATE meetings SET 
                 title = ?1,
                 updated_at = ?2,
@@ -145,6 +151,7 @@ impl Database {
             ],
         )?;
 
+        println!("✅ Database update completed, rows affected: {}", rows_affected);
         Ok(())
     }
 
