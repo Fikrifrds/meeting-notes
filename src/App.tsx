@@ -290,7 +290,7 @@ function App() {
       setIsRecording(false);
       
       // Extract file path from result message
-      const pathMatch = result.match(/Recording stopped and saved: (.+)/);
+      const pathMatch = result.match(/Recording stopped and saved: (.+?) \(Duration:/);
       if (pathMatch) {
         setLastRecordingPath(pathMatch[1]);
         

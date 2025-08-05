@@ -688,6 +688,16 @@ fn transcribe_with_whisper_segments(ctx: &WhisperContext, audio_data: &[f32], la
     })
 }
 
+fn calculate_audio_duration(path: &str) -> Result<i64, String> {
+    let reader = hound::WavReader::open(path)
+        .map_err(|e| format!("Failed to open audio file: {}", e))?;
+    
+    let spec = reader.spec();
+    let duration_seconds = reader.duration() as f64 / spec.sample_rate as f64;
+    
+    Ok(duration_seconds.round() as i64)
+}
+
 fn load_audio_file(path: &str) -> Result<Vec<f32>, String> {
     let mut reader = hound::WavReader::open(path)
         .map_err(|e| format!("Failed to open audio file: {}", e))?;
@@ -1272,6 +1282,14 @@ async fn stop_recording(state: State<'_, AudioState>) -> Result<String, String> 
         return Err("Not currently recording".to_string());
     }
     
+    // Calculate recording duration
+    let end_time = chrono::Utc::now();
+    let duration_seconds = if let Some(start) = *start_time {
+        end_time.signed_duration_since(start).num_seconds()
+    } else {
+        0
+    };
+    
     *is_recording = false;
     *start_time = None;
     
@@ -1296,7 +1314,11 @@ async fn stop_recording(state: State<'_, AudioState>) -> Result<String, String> 
         writer.finalize()
             .map_err(|e| format!("Failed to finalize WAV file: {}", e))?;
         
-        Ok(format!("Recording stopped and saved: {}", path.display()))
+        println!("✅ Recording saved: {} (Duration: {}s, Samples: {})", 
+                 path.display(), duration_seconds, recording_data.len());
+        
+        Ok(format!("Recording stopped and saved: {} (Duration: {}s)", 
+                   path.display(), duration_seconds))
     } else {
         Ok("Recording stopped".to_string())
     }
@@ -1693,7 +1715,18 @@ Include the following sections:
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
 
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document."#, language_instruction);
+At the end, add a metadata section with:
+6. **Key Topics** - List 3-5 main topics as comma-separated values (e.g., "API Development, Mobile App, Progress Tracking")
+7. **Sentiment** - Overall meeting sentiment (Positive, Neutral, or Negative)
+8. **Energy** - Meeting energy level (High, Medium, or Low)
+
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
+
+IMPORTANT: End your response with exactly this format:
+---
+KEY_TOPICS: [comma-separated list of 3-5 topics]
+SENTIMENT: [Positive/Neutral/Negative]
+ENERGY: [High/Medium/Low]"#, language_instruction);
 
     let user_prompt = format!("Please generate meeting minutes from this transcript:\n\n{}", transcript);
 
@@ -1798,7 +1831,18 @@ Include the following sections:
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
 
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document."#, language_instruction);
+At the end, add a metadata section with:
+6. **Key Topics** - List 3-5 main topics as comma-separated values (e.g., "API Development, Mobile App, Progress Tracking")
+7. **Sentiment** - Overall meeting sentiment (Positive, Neutral, or Negative)
+8. **Energy** - Meeting energy level (High, Medium, or Low)
+
+Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
+
+IMPORTANT: End your response with exactly this format:
+---
+KEY_TOPICS: [comma-separated list of 3-5 topics]
+SENTIMENT: [Positive/Neutral/Negative]
+ENERGY: [High/Medium/Low]"#, language_instruction);
 
     let full_prompt = format!("{}\n\nPlease generate meeting minutes from this transcript:\n\n{}", system_prompt, transcript);
 
@@ -1945,9 +1989,21 @@ async fn save_transcript_to_database(
     let mut meeting = db.create_meeting(title, language)
         .map_err(|e| format!("Failed to create meeting: {}", e))?;
     
-    // Update meeting with transcript and audio file path
+    // Calculate duration from segments or audio file
+    let duration_seconds = if !segments.is_empty() {
+        // Use the end time of the last segment as total duration
+        segments.iter().map(|s| s.end as i64).max().unwrap_or(0)
+    } else if let Some(ref audio_path) = audio_file_path {
+        // Try to get duration from audio file
+        calculate_audio_duration(audio_path).unwrap_or(0)
+    } else {
+        0
+    };
+    
+    // Update meeting with transcript, audio file path, and duration
     meeting.transcript = Some(transcript);
     meeting.audio_file_path = audio_file_path;
+    meeting.duration_seconds = Some(duration_seconds);
     db.update_meeting(&meeting)
         .map_err(|e| format!("Failed to update meeting with transcript: {}", e))?;
     
@@ -2106,6 +2162,51 @@ async fn get_audio_file_data(file_path: String) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to read audio file: {}", e))?;
     
     Ok(audio_data)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AudioQualityInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub duration_seconds: f64,
+    pub file_size_bytes: u64,
+    pub bitrate_kbps: u32,
+}
+
+#[tauri::command]
+async fn get_audio_quality_info(file_path: String) -> Result<AudioQualityInfo, String> {
+    use std::fs;
+    
+    if !std::path::Path::new(&file_path).exists() {
+        return Err("Audio file not found".to_string());
+    }
+    
+    let metadata = fs::metadata(&file_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    
+    let reader = hound::WavReader::open(&file_path)
+        .map_err(|e| format!("Failed to open audio file: {}", e))?;
+    
+    let spec = reader.spec();
+    let duration_seconds = reader.duration() as f64 / spec.sample_rate as f64;
+    let file_size_bytes = metadata.len();
+    
+    // Calculate bitrate (bits per second / 1000 for kbps)
+    let bitrate_kbps = if duration_seconds > 0.0 {
+        ((file_size_bytes * 8) as f64 / duration_seconds / 1000.0) as u32
+    } else {
+        0
+    };
+    
+    Ok(AudioQualityInfo {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        bits_per_sample: spec.bits_per_sample,
+        duration_seconds,
+        file_size_bytes,
+        bitrate_kbps,
+    })
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2405,6 +2506,7 @@ pub fn run() {
             save_transcript_to_database,
             save_meeting_minutes_to_database,
             get_audio_file_data,
+            get_audio_quality_info,
             export_meeting_data,
             greet
         ])
