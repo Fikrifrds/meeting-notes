@@ -1,8 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from 'react-markdown';
 import TranscriptionSegments, { TranscriptionResult } from './components/TranscriptionSegments';
 import MeetingsManager from "./components/MeetingsManager";
+import { 
+  Mic, 
+  Square, 
+  Play, 
+  FileText, 
+  Bot, 
+  Sparkles, 
+  Trash2, 
+  Settings, 
+  Save, 
+  X, 
+  Zap, 
+  RefreshCw, 
+  TestTube, 
+  Volume2, 
+  Wrench, 
+  Search, 
+  Folder, 
+  Upload,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  Cloud,
+  Home,
+  Lock,
+  Globe,
+  Sliders,
+  Target,
+  BarChart3,
+  Info
+} from 'lucide-react';
 import "./App.css";
 
 function App() {
@@ -39,6 +70,7 @@ function App() {
   const [transcriptionResult, setTranscriptionResult] = useState<TranscriptionResult | null>(null);
   const [whisperInitialized, setWhisperInitialized] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionProgress, setTranscriptionProgress] = useState(0);
   const [lastRecordingPath, setLastRecordingPath] = useState("");
   const [isRealtimeEnabled, setIsRealtimeEnabled] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState("Not recording");
@@ -53,6 +85,10 @@ function App() {
   const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // Default to English
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null); // Track current meeting
+  
+  // Audio file upload state
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Audio device selection state
   interface AudioDevice {
@@ -94,6 +130,68 @@ function App() {
     
     return () => clearTimeout(timer);
   }, []);
+
+  // Function to trigger file input
+  const triggerFileUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  // Audio file upload handler
+  const handleAudioUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check file type
+    const allowedTypes = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a'];
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(wav|mp3|mp4|m4a)$/i)) {
+      showError("Please select a valid audio file (WAV, MP3, MP4, M4A)");
+      return;
+    }
+
+    try {
+      setIsUploadingAudio(true);
+      setTranscript("");
+      setTranscriptionResult(null);
+      setMeetingMinutes("");
+      setTranscriptionProgress(0);
+      
+      // Create a temporary file path for the uploaded audio
+      const tempPath = await invoke<string>("save_uploaded_audio", { 
+        fileName: file.name,
+        fileData: Array.from(new Uint8Array(await file.arrayBuffer()))
+      });
+      
+      setLastRecordingPath(tempPath);
+      showError("Audio file uploaded successfully! Starting automatic transcription...");
+      
+      // Create a new meeting for the uploaded audio
+      const meetingResult = await invoke<{id: string}>("save_transcript_to_database", {
+        title: `Uploaded Audio - ${file.name} - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        transcript: "Processing uploaded audio...",
+        segments: [],
+        language: selectedLanguage === 'auto' ? null : selectedLanguage,
+        audioFilePath: tempPath
+      });
+      
+      setCurrentMeetingId(meetingResult.id);
+      console.log("Meeting created for uploaded audio with ID:", meetingResult.id);
+      
+      // Automatically start transcription
+      await autoTranscribeUploadedAudio(tempPath, meetingResult.id);
+      
+    } catch (error) {
+      console.error("Failed to upload audio file:", error);
+      showError(`Failed to upload audio file: ${error}`);
+    } finally {
+      setIsUploadingAudio(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
   // Auto-initialize Whisper and database
   const autoInitialize = async () => {
@@ -321,7 +419,7 @@ function App() {
           await autoTranscribeAndSave(result.audio_file_path);
         } catch (autoSaveError) {
           console.error("Auto-transcribe and save failed:", autoSaveError);
-          showError(`⚠️ Auto-transcription failed, but meeting was already created with ID: ${currentMeetingId}. You can transcribe manually later.`);
+          showError(`WARNING: Auto-transcription failed, but meeting was already created with ID: ${currentMeetingId}. You can transcribe manually later.`);
         }
       } else {
         showError(`Recording stopped but no audio file was saved: ${result.message}`);
@@ -331,6 +429,60 @@ function App() {
       console.error("Failed to stop recording:", error);
       setIsRecording(false);
       showError(`Failed to stop recording: ${error}`);
+    }
+  };
+
+  // Auto-transcribe uploaded audio and save to database
+  const autoTranscribeUploadedAudio = async (audioPath: string, meetingId: string) => {
+    const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+    
+    try {
+      setIsTranscribing(true);
+      setTranscriptionProgress(0);
+      setTranscript("Starting transcription...");
+      
+      // Start progress simulation
+      const progressInterval = setInterval(() => {
+        setTranscriptionProgress(prev => {
+          if (prev < 90) {
+            return prev + Math.random() * 10;
+          }
+          return prev;
+        });
+      }, 500);
+      
+      // Transcribe audio
+      const transcriptionResult = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { 
+        audioPath: audioPath,
+        language: languageParam 
+      });
+      
+      // Complete progress
+      clearInterval(progressInterval);
+      setTranscriptionProgress(100);
+      
+      setTranscript(transcriptionResult.full_text);
+      setTranscriptionResult(transcriptionResult);
+      
+      // Update the meeting with transcript
+      const savedMeeting = await invoke<{id: string}>("update_meeting_transcript", {
+        meetingId: meetingId,
+        title: `Uploaded Audio - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        transcript: transcriptionResult.full_text,
+        segments: transcriptionResult.segments,
+        language: languageParam,
+        audioFilePath: audioPath
+      });
+      
+      console.log("Uploaded audio transcribed and saved:", savedMeeting);
+      showError("SUCCESS: Audio uploaded and transcribed automatically! Meeting saved to database.");
+      
+    } catch (error) {
+      console.error("Auto-transcription of uploaded audio failed:", error);
+      showError(`Transcription failed: ${error}`);
+    } finally {
+      setIsTranscribing(false);
+      setTranscriptionProgress(0);
     }
   };
 
@@ -346,13 +498,28 @@ function App() {
     
     try {
       setIsTranscribing(true);
+      setTranscriptionProgress(0);
       setTranscript("Auto-transcribing audio...");
+      
+      // Start progress simulation
+      const progressInterval = setInterval(() => {
+        setTranscriptionProgress(prev => {
+          if (prev < 90) {
+            return prev + Math.random() * 10;
+          }
+          return prev;
+        });
+      }, 500);
       
       // Transcribe audio
       const transcriptionResult = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { 
         audioPath: audioPath,
         language: languageParam 
       });
+      
+      // Complete progress
+      clearInterval(progressInterval);
+      setTranscriptionProgress(100);
       
       setTranscript(transcriptionResult.full_text);
       setTranscriptionResult(transcriptionResult);
@@ -368,7 +535,7 @@ function App() {
        });
        
        console.log("Transcript auto-saved to database:", savedMeeting);
-       showError("✅ Recording transcribed and saved to database automatically!");
+       showError("SUCCESS: Recording transcribed and saved to database automatically!");
       
     } catch (error) {
       console.error("Auto-transcription failed:", error);
@@ -385,13 +552,14 @@ function App() {
         });
         
         console.log("Meeting updated with audio path despite transcription failure:", savedMeeting);
-        showError(`⚠️ Transcription failed, but meeting saved with audio file: ${error}`);
+        showError(`WARNING: Transcription failed, but meeting saved with audio file: ${error}`);
       } catch (saveError) {
         console.error("Failed to update meeting with audio path:", saveError);
         showError(`Auto-transcription failed: ${error}. Also failed to update meeting: ${saveError}`);
       }
     } finally {
       setIsTranscribing(false);
+      setTranscriptionProgress(0);
     }
   };
 
@@ -404,8 +572,19 @@ function App() {
     try {
       clearError();
       setIsTranscribing(true);
+      setTranscriptionProgress(0);
       setTranscript("Processing audio file...");
       setTranscriptionResult(null);
+      
+      // Start progress simulation
+      const progressInterval = setInterval(() => {
+        setTranscriptionProgress(prev => {
+          if (prev < 90) {
+            return prev + Math.random() * 10;
+          }
+          return prev;
+        });
+      }, 500);
       
       // Pass language parameter to backend
       const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
@@ -414,6 +593,10 @@ function App() {
         language: languageParam 
       });
       console.log("Transcription result:", result);
+      
+      // Complete progress
+      clearInterval(progressInterval);
+      setTranscriptionProgress(100);
       
       setTranscript(result.full_text);
       setTranscriptionResult(result);
@@ -425,6 +608,7 @@ function App() {
       showError(`Failed to transcribe audio: ${error}`);
     } finally {
       setIsTranscribing(false);
+      setTranscriptionProgress(0);
     }
   };
 
@@ -507,7 +691,7 @@ function App() {
       });
       
       console.log("Meeting minutes auto-saved to database");
-      showError("✅ Meeting minutes generated and saved to database automatically!");
+      showError("SUCCESS: Meeting minutes generated and saved to database automatically!");
       
     } catch (error) {
       console.error("Failed to auto-save meeting minutes:", error);
@@ -534,10 +718,10 @@ function App() {
       clearError();
       const result = await invoke<string>("test_microphone_access");
       console.log("Microphone test result:", result);
-      showError(`✅ ${result}`);
+      showError(`SUCCESS: ${result}`);
     } catch (error) {
       console.error("Microphone test failed:", error);
-      showError(`❌ Microphone test failed: ${error}`);
+      showError(`ERROR: Microphone test failed: ${error}`);
     }
   };
 
@@ -546,10 +730,10 @@ function App() {
       clearError();
       const result = await invoke<string>("test_audio_system");
       console.log("Audio system test result:", result);
-      showError(`🔊 ${result}`);
+      showError(`AUDIO: ${result}`);
     } catch (error) {
       console.error("Audio system test failed:", error);
-      showError(`❌ Audio system test failed: ${error}`);
+      showError(`ERROR: Audio system test failed: ${error}`);
     }
   };
 
@@ -558,10 +742,10 @@ function App() {
       clearError();
       const result = await invoke<string>("debug_meeting_audio_paths");
       console.log("Debug audio paths result:", result);
-      showError(`🔍 ${result}`);
+      showError(`DEBUG: ${result}`);
     } catch (error) {
       console.error("Debug audio paths failed:", error);
-      showError(`❌ Debug audio paths failed: ${error}`);
+      showError(`ERROR: Debug audio paths failed: ${error}`);
     }
   };
 
@@ -570,10 +754,10 @@ function App() {
       clearError();
       const result = await invoke<string>("update_audio_file_paths");
       console.log("Audio paths update result:", result);
-      showError(`🔧 ${result}`);
+      showError(`UPDATE: ${result}`);
     } catch (error) {
       console.error("Audio paths update failed:", error);
-      showError(`❌ Audio paths update failed: ${error}`);
+      showError(`ERROR: Audio paths update failed: ${error}`);
     }
   };
 
@@ -585,7 +769,7 @@ function App() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
-                <span className="text-white text-xl">🎙️</span>
+                <Mic className="text-white w-6 h-6" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Meeting Recorder</h1>
@@ -598,23 +782,25 @@ function App() {
               <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
                 <button
                   onClick={() => setCurrentView('recording')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
                     currentView === 'recording'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  🎙️ Recording
+                  <Mic className="w-4 h-4" />
+                  <span>Recording</span>
                 </button>
                 <button
                   onClick={() => setCurrentView('meetings')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
                     currentView === 'meetings'
                       ? 'bg-white text-blue-600 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  📋 Meetings
+                  <FileText className="w-4 h-4" />
+                  <span>Meetings</span>
                 </button>
               </div>
               
@@ -639,14 +825,14 @@ function App() {
       {/* Message Banner */}
       {error && (
         <div className={`border-l-4 p-4 mx-4 mt-4 rounded-r-lg ${
-          error.startsWith('✅') || error.startsWith('🔊') 
+          error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
             ? 'bg-green-50 border-green-400' 
             : 'bg-red-50 border-red-400'
         }`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                {error.startsWith('✅') || error.startsWith('🔊') ? (
+                {error.startsWith('SUCCESS') || error.startsWith('AUDIO') ? (
                   <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
@@ -658,7 +844,7 @@ function App() {
               </div>
               <div className="ml-3">
                 <p className={`text-sm ${
-                  error.startsWith('✅') || error.startsWith('🔊') 
+                  error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
                     ? 'text-green-700' 
                     : 'text-red-700'
                 }`}>{error}</p>
@@ -667,7 +853,7 @@ function App() {
             <button 
               onClick={clearError}
               className={`transition-colors ${
-                error.startsWith('✅') || error.startsWith('🔊') 
+                error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
                   ? 'text-green-400 hover:text-green-600' 
                   : 'text-red-400 hover:text-red-600'
               }`}
@@ -713,48 +899,82 @@ function App() {
             <div className="flex flex-wrap justify-center gap-4">
               {!whisperInitialized && (
                 <button 
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
                   onClick={initializeWhisper}
                 >
-                  <span className="mr-2">⚡</span>
+                  <Zap className="w-4 h-4 mr-2" />
                   Initialize Whisper
                 </button>
+              )}
+
+              {/* Audio File Upload */}
+              {whisperInitialized && !isRecording && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="audio/*,.wav,.mp3,.mp4,.m4a"
+                    onChange={handleAudioUpload}
+                    className="hidden"
+                    disabled={isUploadingAudio}
+                  />
+                  <button 
+                    className="bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
+                    onClick={triggerFileUpload}
+                    disabled={isUploadingAudio}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    {isUploadingAudio ? 'Uploading...' : 'Upload Audio File'}
+                  </button>
+                </>
               )}
               
               {whisperInitialized && !isRecording && (
                 <button
-                  className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg ${
+                  className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center ${
                     isRealtimeEnabled 
                       ? 'bg-green-500 hover:bg-green-600 text-white' 
                       : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
                   }`}
                   onClick={toggleRealtimeTranscription}
                 >
-                  <span className="mr-2">{isRealtimeEnabled ? '🔴' : '⚡'}</span>
+                  {isRealtimeEnabled ? (
+                    <div className="w-3 h-3 bg-red-400 rounded-full mr-2"></div>
+                  ) : (
+                    <Zap className="w-4 h-4 mr-2" />
+                  )}
                   {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
                 </button>
               )}
               
               <button
-                className={`px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 shadow-lg ${
+                className={`px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center ${
                   isRecording 
                     ? 'bg-red-500 hover:bg-red-600 text-white' 
                     : 'bg-blue-500 hover:bg-blue-600 text-white'
                 }`}
                 onClick={isRecording ? stopRecording : startRecording}
               >
-                <span className="mr-2">{isRecording ? '⏹️' : '▶️'}</span>
+                {isRecording ? (
+                  <Square className="w-5 h-5 mr-2" />
+                ) : (
+                  <Play className="w-5 h-5 mr-2" />
+                )}
                 {isRecording ? 'Stop Recording' : 'Start Recording'}
               </button>
 
               {lastRecordingPath && whisperInitialized && !isRecording && (
                 <button 
-                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
                   onClick={transcribeAudio}
                   disabled={isTranscribing}
                 >
-                  <span className="mr-2">{isTranscribing ? '⏳' : '📝'}</span>
-                  {isTranscribing ? 'Transcribing...' : 'Transcribe Audio'}
+                  {isTranscribing ? (
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4 mr-2" />
+                  )}
+                  {isTranscribing ? `Transcribing... ${Math.round(transcriptionProgress)}%` : 'Transcribe Audio'}
                 </button>
               )}
             </div>
@@ -765,7 +985,7 @@ function App() {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
           <div className="flex items-center mb-6">
             <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-              <span className="text-blue-600">📝</span>
+              <FileText className="text-blue-600 w-5 h-5" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900">Transcript</h2>
           </div>
@@ -781,6 +1001,24 @@ function App() {
                   <p className="text-gray-800 leading-relaxed whitespace-pre-wrap">
                     {realtimeTranscript}
                   </p>
+                </div>
+              </div>
+            )}
+            
+            {isTranscribing && (
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center">
+                    <RefreshCw className="w-5 h-5 text-blue-600 animate-spin mr-2" />
+                    <h3 className="text-lg font-semibold text-blue-800">Processing Transcription</h3>
+                  </div>
+                  <span className="text-sm font-medium text-blue-700">{Math.round(transcriptionProgress)}%</span>
+                </div>
+                <div className="w-full bg-blue-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${transcriptionProgress}%` }}
+                  ></div>
                 </div>
               </div>
             )}
@@ -802,17 +1040,17 @@ function App() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center">
               <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-                <span className="text-purple-600">🤖</span>
+                <Bot className="text-purple-600 w-5 h-5" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900">AI Meeting Minutes</h3>
             </div>
             {transcript && !isRecording && (
               <button 
-                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
                 onClick={generateMeetingMinutes}
                 disabled={isGeneratingMinutes}
               >
-                <span className="mr-2">✨</span>
+                <Sparkles className="w-4 h-4 mr-2" />
                 {isGeneratingMinutes ? 'Generating...' : 'Generate Minutes'}
               </button>
             )}
@@ -826,7 +1064,7 @@ function App() {
             ) : (
               <div className="text-center py-12">
                 <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl text-gray-400">🤖</span>
+                  <Bot className="w-8 h-8 text-gray-400" />
                 </div>
                 <p className="text-gray-500">AI-generated meeting minutes will appear here after generating...</p>
               </div>
@@ -839,25 +1077,25 @@ function App() {
         {/* Action Buttons */}
         <div className="flex flex-wrap justify-center gap-4 mb-8">
           <button 
-            className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+            className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
             onClick={handleClearAll}
           >
-            <span className="mr-2">🗑️</span>
+            <Trash2 className="w-4 h-4 mr-2" />
             Clear All
           </button>
           <button 
-            className="bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+            className="bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
             onClick={toggleSettings}
           >
-            <span className="mr-2">⚙️</span>
+            <Settings className="w-4 h-4 mr-2" />
             Settings
           </button>
           <button 
-            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
             onClick={handleSave}
             disabled={!transcript}
           >
-            <span className="mr-2">💾</span>
+            <Save className="w-4 h-4 mr-2" />
             Save Files
           </button>
         </div>
@@ -870,7 +1108,7 @@ function App() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center">
                     <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center mr-3">
-                      <span className="text-slate-600">⚙️</span>
+                      <Settings className="text-slate-600 w-5 h-5" />
                     </div>
                     <h3 className="text-xl font-bold text-gray-900">Settings</h3>
                   </div>
@@ -878,9 +1116,7 @@ function App() {
                     className="text-gray-400 hover:text-gray-600 transition-colors p-2"
                     onClick={() => setShowSettings(false)}
                   >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <X className="w-6 h-6" />
                   </button>
                 </div>
               </div>
@@ -897,13 +1133,19 @@ function App() {
                       disabled={isRecording}
                       className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                     />
-                    <span className="text-gray-700 font-medium">⚡ Enable Real-time Transcription</span>
+                    <span className="text-gray-700 font-medium flex items-center">
+                      <Zap className="w-4 h-4 mr-2" />
+                      Enable Real-time Transcription
+                    </span>
                   </label>
                 </div>
 
                 {/* AI Provider Selection */}
                 <div className="space-y-4">
-                  <h4 className="text-lg font-semibold text-gray-800">🤖 AI Provider for Meeting Minutes</h4>
+                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Bot className="w-5 h-5 mr-2" />
+                    AI Provider for Meeting Minutes
+                  </h4>
                   <div className="space-y-3">
                     <label className="flex items-center space-x-3 cursor-pointer">
                       <input
@@ -915,7 +1157,10 @@ function App() {
                         className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
                       />
                       <div className="flex-1">
-                        <span className="text-gray-700 font-medium">🏠 Ollama (Local)</span>
+                        <span className="text-gray-700 font-medium flex items-center">
+                          <Home className="w-4 h-4 mr-2" />
+                          Ollama (Local)
+                        </span>
                         <p className="text-sm text-gray-500">Private, runs locally on your device. Requires Ollama installation.</p>
                       </div>
                     </label>
@@ -929,7 +1174,10 @@ function App() {
                         className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
                       />
                       <div className="flex-1">
-                        <span className="text-gray-700 font-medium">☁️ OpenAI (Cloud)</span>
+                        <span className="text-gray-700 font-medium flex items-center">
+                          <Cloud className="w-4 h-4 mr-2" />
+                          OpenAI (Cloud)
+                        </span>
                         <p className="text-sm text-gray-500">Fast and reliable. Requires API key and sends transcript to OpenAI.</p>
                       </div>
                     </label>
@@ -938,14 +1186,15 @@ function App() {
                   {aiProvider === 'ollama' && (
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                       <div className="flex items-start space-x-2">
-                        <span className="text-green-600 text-lg">🔒</span>
+                        <Lock className="text-green-600 w-5 h-5 mt-0.5" />
                         <div>
                           <h5 className="font-medium text-green-900">Privacy First</h5>
                           <p className="text-sm text-green-700 mt-1">
                             Your transcript never leaves your device. Requires Ollama to be running locally.
                           </p>
-                          <p className="text-xs text-green-600 mt-2">
-                            💡 Make sure Ollama is installed and running with a model like llama3.1:8b
+                          <p className="text-xs text-green-600 mt-2 flex items-center">
+                            <Info className="w-3 h-3 mr-1" />
+                            Make sure Ollama is installed and running with a model like llama3.1:8b
                           </p>
                         </div>
                       </div>
@@ -955,14 +1204,15 @@ function App() {
                   {aiProvider === 'openai' && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <div className="flex items-start space-x-2">
-                        <span className="text-yellow-600 text-lg">⚠️</span>
+                        <AlertTriangle className="text-yellow-600 w-5 h-5 mt-0.5" />
                         <div>
                           <h5 className="font-medium text-yellow-900">Privacy Notice</h5>
                           <p className="text-sm text-yellow-700 mt-1">
                             Transcript text will be sent to OpenAI for processing. Requires valid API key.
                           </p>
-                          <p className="text-xs text-yellow-600 mt-2">
-                            💡 Set OPENAI_API_KEY in your .env file
+                          <p className="text-xs text-yellow-600 mt-2 flex items-center">
+                            <Info className="w-3 h-3 mr-1" />
+                            Set OPENAI_API_KEY in your .env file
                           </p>
                         </div>
                       </div>
@@ -972,7 +1222,10 @@ function App() {
 
                 {/* Language Selection */}
                 <div className="space-y-4">
-                  <h4 className="text-lg font-semibold text-gray-800">🌍 Transcription Language</h4>
+                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Globe className="w-5 h-5 mr-2" />
+                    Transcription Language
+                  </h4>
                   <div className="space-y-2">
                     <label htmlFor="language-select" className="block text-sm font-medium text-gray-700">
                       Select Language for Transcription:
@@ -989,22 +1242,24 @@ function App() {
                         </option>
                       ))}
                     </select>
-                    <div className="text-xs text-gray-500 mt-1">
-                      💡 Choose "Auto-detect" to let Whisper automatically identify the language, or select a specific language for better accuracy.
+                    <div className="text-xs text-gray-500 mt-1 flex items-center">
+                      <Info className="w-3 h-3 mr-1" />
+                      Choose "Auto-detect" to let Whisper automatically identify the language, or select a specific language for better accuracy.
                     </div>
                   </div>
                   
                   {selectedLanguage === 'id' && (
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                       <div className="flex items-start space-x-2">
-                        <span className="text-green-600 text-lg">🇮🇩</span>
+                        <Target className="text-green-600 w-5 h-5 mt-0.5" />
                         <div>
                           <h5 className="font-medium text-green-900">Indonesian Language Support</h5>
                           <p className="text-sm text-green-700 mt-1">
                             Optimized for Indonesian (Bahasa Indonesia) transcription. Works best with multilingual Whisper models.
                           </p>
-                          <p className="text-xs text-green-600 mt-2">
-                            💡 Recommended models: Large V3, Medium, or Small (avoid Turbo for best accuracy)
+                          <p className="text-xs text-green-600 mt-2 flex items-center">
+                            <Info className="w-3 h-3 mr-1" />
+                            Recommended models: Large V3, Medium, or Small (avoid Turbo for best accuracy)
                           </p>
                         </div>
                       </div>
@@ -1014,7 +1269,7 @@ function App() {
                   {selectedLanguage === 'auto' && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <div className="flex items-start space-x-2">
-                        <span className="text-blue-600 text-lg">🔍</span>
+                        <Search className="text-blue-600 w-5 h-5 mt-0.5" />
                         <div>
                           <h5 className="font-medium text-blue-900">Auto-detect Language</h5>
                           <p className="text-sm text-blue-700 mt-1">
@@ -1028,12 +1283,16 @@ function App() {
 
                 {/* Audio Gain Settings */}
                 <div className="space-y-6">
-                  <h4 className="text-lg font-semibold text-gray-800">🎚️ Audio Gain Settings</h4>
+                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Sliders className="w-5 h-5 mr-2" />
+                    Audio Gain Settings
+                  </h4>
                   
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <label htmlFor="mic-gain" className="block text-sm font-medium text-gray-700">
-                        🎤 Microphone Gain: <span className="text-blue-600 font-semibold">{micGain.toFixed(1)}</span>
+                      <label htmlFor="mic-gain" className="block text-sm font-medium text-gray-700 flex items-center">
+                        <Mic className="w-4 h-4 mr-2" />
+                        Microphone Gain: <span className="text-blue-600 font-semibold">{micGain.toFixed(1)}</span>
                       </label>
                       <input
                         id="mic-gain"
@@ -1051,8 +1310,9 @@ function App() {
                     </div>
                     
                     <div className="space-y-2">
-                      <label htmlFor="system-gain" className="block text-sm font-medium text-gray-700">
-                        🔊 System Audio Gain: <span className="text-blue-600 font-semibold">{systemGain.toFixed(1)}</span>
+                      <label htmlFor="system-gain" className="block text-sm font-medium text-gray-700 flex items-center">
+                        <Volume2 className="w-4 h-4 mr-2" />
+                        System Audio Gain: <span className="text-blue-600 font-semibold">{systemGain.toFixed(1)}</span>
                       </label>
                       <input
                         id="system-gain"
@@ -1094,7 +1354,10 @@ function App() {
 
                 {/* Audio Device Selection */}
                 <div className="space-y-6">
-                  <h4 className="text-lg font-semibold text-gray-800">🎤 Audio Device Selection</h4>
+                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
+                    <Mic className="w-5 h-5 mr-2" />
+                    Audio Device Selection
+                  </h4>
                   
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -1148,61 +1411,72 @@ function App() {
                           </option>
                         ))}
                       </select>
-                      <div className="text-xs text-gray-500 mt-1">
-                        💡 The system will capture audio from <strong>one</strong> source. Auto-detect finds the best available loopback device.
+                      <div className="text-xs text-gray-500 mt-1 flex items-center">
+                        <Info className="w-3 h-3 mr-1" />
+                        The system will capture audio from <strong>one</strong> source. Auto-detect finds the best available loopback device.
                       </div>
                     </div>
                   </div>
                   
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h5 className="font-medium text-blue-900 mb-2">🎯 Active Audio Sources:</h5>
+                    <h5 className="font-medium text-blue-900 mb-2 flex items-center">
+                      <Target className="w-4 h-4 mr-2" />
+                      Active Audio Sources:
+                    </h5>
                     <div className="space-y-1 text-sm text-blue-800">
-                      <p>🎤 Microphone Input: <span className="font-medium">{selectedMicDevice || 'Default device'}</span></p>
-                      <p>🔊 System Audio Capture: <span className="font-medium">{selectedSystemDevice || 'Auto-detecting best source'}</span></p>
+                      <p className="flex items-center">
+                        <Mic className="w-3 h-3 mr-2" />
+                        Microphone Input: <span className="font-medium ml-1">{selectedMicDevice || 'Default device'}</span>
+                      </p>
+                      <p className="flex items-center">
+                        <Volume2 className="w-3 h-3 mr-2" />
+                        System Audio Capture: <span className="font-medium ml-1">{selectedSystemDevice || 'Auto-detecting best source'}</span>
+                      </p>
                     </div>
-                    <div className="mt-2 text-xs text-blue-600">
-                      ℹ️ Both sources are mixed into a single recording
+                    <div className="mt-2 text-xs text-blue-600 flex items-center">
+                      <Info className="w-3 h-3 mr-1" />
+                      Both sources are mixed into a single recording
                     </div>
                   </div>
                   
                   <div className="flex flex-wrap gap-3">
                     <button 
-                      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={loadAudioDevices}
                     >
-                      <span className="mr-2">🔄</span>
+                      <RefreshCw className="w-4 h-4 mr-2" />
                       Refresh Devices
                     </button>
                     
                     <button 
-                      className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={testMicrophoneAccess}
                     >
-                      <span className="mr-2">🧪</span>
+                      <TestTube className="w-4 h-4 mr-2" />
                       Test Microphone
                     </button>
                     
                     <button 
-                      className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={testAudioSystem}
                     >
-                      <span className="mr-2">🔊</span>
+                      <Volume2 className="w-4 h-4 mr-2" />
                       Test Audio System
                     </button>
                     
                     <button 
-                      className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={updateAudioPaths}
                     >
-                      <span className="mr-2">🔧</span>
+                      <Wrench className="w-4 h-4 mr-2" />
                       Fix Audio Paths
                     </button>
                     
                     <button 
-                      className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={debugAudioPaths}
                     >
-                      <span className="mr-2">🔍</span>
+                      <Search className="w-4 h-4 mr-2" />
                       Debug Audio Paths
                     </button>
                   </div>
@@ -1216,7 +1490,10 @@ function App() {
 
         {/* Footer */}
         <div className="text-center py-6 text-gray-500 text-sm bg-white rounded-2xl shadow-lg border border-gray-200">
-          <p>📁 Files saved to: <span className="font-mono">Documents/MeetingRecorder/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*</span></p>
+          <p className="flex items-center justify-center">
+            <Folder className="w-4 h-4 mr-2" />
+            Files saved to: <span className="font-mono ml-1">Documents/MeetingRecorder/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*</span>
+          </p>
         </div>
     </main>
       </div>

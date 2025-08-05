@@ -1425,6 +1425,46 @@ async fn save_transcript_to_file(transcript: String, filename: Option<String>) -
     Ok(format!("Transcript saved to: {}", file_path.display()))
 }
 
+#[tauri::command]
+async fn save_uploaded_audio(file_name: String, file_data: Vec<u8>) -> Result<String, String> {
+    use std::fs;
+    use std::io::Write;
+    
+    // Create the output directory
+    let home_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?;
+    let output_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
+    
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    
+    // Generate a unique filename with timestamp
+    let now = chrono::Utc::now();
+    let file_extension = std::path::Path::new(&file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("wav");
+    
+    let unique_filename = format!("uploaded_{}_{}.{}", 
+        now.format("%Y%m%d_%H%M%S"), 
+        uuid::Uuid::new_v4().to_string()[..8].to_string(),
+        file_extension
+    );
+    
+    let file_path = output_dir.join(&unique_filename);
+    
+    // Write the uploaded file data
+    let mut file = fs::File::create(&file_path)
+        .map_err(|e| format!("Failed to create uploaded audio file: {}", e))?;
+    
+    file.write_all(&file_data)
+        .map_err(|e| format!("Failed to write uploaded audio data: {}", e))?;
+    
+    println!("📁 Uploaded audio file saved: {}", file_path.display());
+    
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 // OpenAI API structures
 #[derive(Serialize, Deserialize)]
 struct OpenAIMessage {
@@ -2862,6 +2902,7 @@ pub fn run() {
             stop_recording, 
             save_files,
             save_transcript_to_file,
+            save_uploaded_audio,
             get_audio_devices,
             set_audio_devices,
             get_selected_devices,
