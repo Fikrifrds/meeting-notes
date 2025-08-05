@@ -294,8 +294,37 @@ function App() {
       if (pathMatch) {
         setLastRecordingPath(pathMatch[1]);
         
-        // Auto-transcribe and save to database
-        await autoTranscribeAndSave(pathMatch[1]);
+        try {
+          // Auto-transcribe and save to database
+          await autoTranscribeAndSave(pathMatch[1]);
+        } catch (autoSaveError) {
+          console.error("Auto-transcribe and save failed:", autoSaveError);
+          
+          // Fallback: Save meeting with audio path only (no transcription)
+          try {
+            const currentDate = new Date();
+            const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
+            const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+            
+            const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
+              title: meetingTitle,
+              transcript: "Recording completed - transcription pending",
+              segments: [],
+              language: languageParam,
+              audio_file_path: pathMatch[1]
+            });
+            
+            if (savedMeeting && savedMeeting.id) {
+              setCurrentMeetingId(savedMeeting.id);
+            }
+            
+            console.log("Meeting saved with audio path as fallback:", savedMeeting);
+            showError(`⚠️ Auto-transcription failed, but meeting saved with audio file. You can transcribe manually later.`);
+          } catch (fallbackError) {
+            console.error("Fallback save also failed:", fallbackError);
+            showError(`Recording saved but failed to save to database: ${fallbackError}`);
+          }
+        }
       }
       
     } catch (error) {
@@ -307,12 +336,15 @@ function App() {
 
   // Auto-transcribe and save to database
   const autoTranscribeAndSave = async (audioPath: string) => {
+    const currentDate = new Date();
+    const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
+    const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
+    
     try {
       setIsTranscribing(true);
       setTranscript("Auto-transcribing audio...");
       
       // Transcribe audio
-      const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
       const transcriptionResult = await invoke<TranscriptionResult>("transcribe_audio_with_segments", { 
         audioPath: audioPath,
         language: languageParam 
@@ -321,16 +353,13 @@ function App() {
       setTranscript(transcriptionResult.full_text);
       setTranscriptionResult(transcriptionResult);
       
-      // Auto-save transcript to database
-      const currentDate = new Date();
-      const meetingTitle = `Meeting ${currentDate.toLocaleDateString()} ${currentDate.toLocaleTimeString()}`;
-      
+      // Auto-save transcript to database with audio path
       const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
          title: meetingTitle,
          transcript: transcriptionResult.full_text,
          segments: transcriptionResult.segments,
          language: languageParam,
-         audioFilePath: lastRecordingPath
+         audio_file_path: audioPath
        });
        
        // Store the meeting ID for later use
@@ -343,7 +372,27 @@ function App() {
       
     } catch (error) {
       console.error("Auto-transcription failed:", error);
-      showError(`Auto-transcription failed: ${error}`);
+      
+      // Even if transcription fails, save the meeting with audio path
+      try {
+        const savedMeeting = await invoke<{id: string}>("save_transcript_to_database", {
+          title: meetingTitle,
+          transcript: "Transcription failed - audio file available",
+          segments: [],
+          language: languageParam,
+          audio_file_path: audioPath
+        });
+        
+        if (savedMeeting && savedMeeting.id) {
+          setCurrentMeetingId(savedMeeting.id);
+        }
+        
+        console.log("Meeting saved with audio path despite transcription failure:", savedMeeting);
+        showError(`⚠️ Transcription failed, but meeting saved with audio file: ${error}`);
+      } catch (saveError) {
+        console.error("Failed to save meeting with audio path:", saveError);
+        showError(`Auto-transcription failed: ${error}. Also failed to save meeting: ${saveError}`);
+      }
     } finally {
       setIsTranscribing(false);
     }
@@ -504,6 +553,30 @@ function App() {
     } catch (error) {
       console.error("Audio system test failed:", error);
       showError(`❌ Audio system test failed: ${error}`);
+    }
+  };
+
+  const debugAudioPaths = async () => {
+    try {
+      clearError();
+      const result = await invoke<string>("debug_meeting_audio_paths");
+      console.log("Debug audio paths result:", result);
+      showError(`🔍 ${result}`);
+    } catch (error) {
+      console.error("Debug audio paths failed:", error);
+      showError(`❌ Debug audio paths failed: ${error}`);
+    }
+  };
+
+  const updateAudioPaths = async () => {
+    try {
+      clearError();
+      const result = await invoke<string>("update_audio_file_paths");
+      console.log("Audio paths update result:", result);
+      showError(`🔧 ${result}`);
+    } catch (error) {
+      console.error("Audio paths update failed:", error);
+      showError(`❌ Audio paths update failed: ${error}`);
     }
   };
 
@@ -1118,6 +1191,22 @@ function App() {
                     >
                       <span className="mr-2">🔊</span>
                       Test Audio System
+                    </button>
+                    
+                    <button 
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      onClick={updateAudioPaths}
+                    >
+                      <span className="mr-2">🔧</span>
+                      Fix Audio Paths
+                    </button>
+                    
+                    <button 
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      onClick={debugAudioPaths}
+                    >
+                      <span className="mr-2">🔍</span>
+                      Debug Audio Paths
                     </button>
                   </div>
                 </div>

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use std::path::PathBuf;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Timelike};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 use std::thread;
 use std::sync::mpsc;
@@ -2472,6 +2472,193 @@ fn export_as_markdown(
 }
 
 #[tauri::command]
+async fn debug_meeting_audio_paths(
+    db_state: State<'_, DatabaseState>
+) -> Result<String, String> {
+    // Initialize database if not already done
+    db_state.initialize().ok();
+    
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    
+    // Get all meetings
+    let meetings = db.get_all_meetings()
+        .map_err(|e| format!("Failed to get meetings: {}", e))?;
+    
+    let mut debug_info = Vec::new();
+    debug_info.push(format!("Found {} meetings in database:", meetings.len()));
+    
+    for (i, meeting) in meetings.iter().enumerate() {
+        let audio_status = match &meeting.audio_file_path {
+            Some(path) => {
+                // Check if file exists
+                if std::path::Path::new(path).exists() {
+                    format!("✅ Audio file exists: {}", path)
+                } else {
+                    format!("❌ Audio file missing: {}", path)
+                }
+            },
+            None => "⚠️ No audio path stored".to_string()
+        };
+        
+        debug_info.push(format!(
+            "{}. Meeting: '{}' (ID: {}) - {}",
+            i + 1,
+            meeting.title,
+            &meeting.id[..8],
+            audio_status
+        ));
+    }
+    
+    Ok(debug_info.join("\n"))
+}
+
+#[tauri::command]
+async fn update_audio_file_paths(
+    db_state: State<'_, DatabaseState>
+) -> Result<String, String> {
+    // Initialize database if not already done
+    db_state.initialize().ok();
+    
+    let db_guard = db_state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    
+    // Get all meetings
+    let meetings = db.get_all_meetings()
+        .map_err(|e| format!("Failed to get meetings: {}", e))?;
+    
+    // Get the recordings directory
+    let home_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?;
+    let recordings_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
+    
+    if !recordings_dir.exists() {
+        return Ok("No recordings directory found".to_string());
+    }
+    
+    // Read all audio files in the directory
+    let audio_files: Vec<_> = std::fs::read_dir(&recordings_dir)
+        .map_err(|e| format!("Failed to read recordings directory: {}", e))?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? == "wav" {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    let mut updated_count = 0;
+    let mut matched_count = 0;
+    
+    let mut debug_info = Vec::new();
+    debug_info.push(format!("=== AUDIO FILE MATCHING DEBUG ==="));
+    debug_info.push(format!("Found {} meetings to process", meetings.len()));
+    debug_info.push(format!("Found {} audio files to scan", audio_files.len()));
+    
+    // Show first few audio files for debugging
+    debug_info.push(format!("\nFirst 5 audio files:"));
+    for (i, audio_file) in audio_files.iter().take(5).enumerate() {
+        if let Some(filename) = audio_file.file_name().and_then(|n| n.to_str()) {
+            debug_info.push(format!("  {}. {}", i + 1, filename));
+        }
+    }
+    
+    for mut meeting in meetings {
+        // Skip if already has audio path
+        if meeting.audio_file_path.is_some() && !meeting.audio_file_path.as_ref().unwrap().is_empty() {
+            continue;
+        }
+        
+        // Try to find matching audio file based on creation time
+        // Convert meeting time to UTC for comparison (audio files might be in UTC)
+        let meeting_utc = meeting.created_at.with_timezone(&chrono::Utc);
+        let meeting_date = meeting.created_at.format("%Y%m%d").to_string();
+        let meeting_hour = meeting_utc.hour();
+        let meeting_minute = meeting_utc.minute();
+        let meeting_second = meeting_utc.second();
+        
+        debug_info.push(format!("\n--- Processing Meeting: {} ---", meeting.title));
+        debug_info.push(format!("Meeting date: {}", meeting_date));
+        debug_info.push(format!("Meeting time (local): {:02}:{:02}:{:02}", meeting.created_at.hour(), meeting.created_at.minute(), meeting.created_at.second()));
+        debug_info.push(format!("Meeting time (UTC): {:02}:{:02}:{:02}", meeting_hour, meeting_minute, meeting_second));
+        debug_info.push(format!("Meeting created_at: {}", meeting.created_at));
+        
+        // Look for audio files that match the date and are close in time
+        let mut best_match: Option<std::path::PathBuf> = None;
+        let mut best_time_diff = i64::MAX;
+        let mut candidates_found = 0;
+        
+        for audio_file in &audio_files {
+            if let Some(filename) = audio_file.file_name().and_then(|n| n.to_str()) {
+                // Parse filename like "recording_20250804_233559.wav"
+                if filename.starts_with("recording_") && filename.contains(&meeting_date) {
+                    candidates_found += 1;
+                    debug_info.push(format!("  Candidate: {}", filename));
+                    
+                    // Extract time from filename
+                    let parts: Vec<&str> = filename.split('_').collect();
+                    if parts.len() >= 3 {
+                        let file_time_str = parts[2].replace(".wav", "");
+                        
+                        // Parse HHMMSS format
+                        if file_time_str.len() == 6 {
+                            if let (Ok(file_hour), Ok(file_minute), Ok(file_second)) = (
+                                file_time_str[0..2].parse::<u32>(),
+                                file_time_str[2..4].parse::<u32>(),
+                                file_time_str[4..6].parse::<u32>()
+                            ) {
+                                // Calculate time difference in seconds
+                                let meeting_total_seconds = (meeting_hour * 3600 + meeting_minute * 60 + meeting_second) as i64;
+                                let file_total_seconds = (file_hour * 3600 + file_minute * 60 + file_second) as i64;
+                                let time_diff = (meeting_total_seconds - file_total_seconds).abs();
+                                
+                                debug_info.push(format!("    File time: {:02}:{:02}:{:02}, diff: {} seconds", file_hour, file_minute, file_second, time_diff));
+                                
+                                if time_diff < best_time_diff {
+                                    best_time_diff = time_diff;
+                                    best_match = Some(audio_file.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        debug_info.push(format!("  Found {} candidates for date {}", candidates_found, meeting_date));
+        
+        // If we found a match within reasonable time range (e.g., 30 minutes = 1800 seconds)
+        if let Some(matched_file) = best_match {
+            debug_info.push(format!("  Best match: {} (diff: {} seconds)", matched_file.file_name().unwrap().to_str().unwrap(), best_time_diff));
+            
+            if best_time_diff < 1800 {
+                meeting.audio_file_path = Some(matched_file.to_string_lossy().to_string());
+                
+                // Update the meeting in the database
+                db.update_meeting(&meeting)
+                    .map_err(|e| format!("Failed to update meeting {}: {}", meeting.id, e))?;
+                
+                updated_count += 1;
+                matched_count += 1;
+                debug_info.push(format!("  ✅ MATCHED and updated!"));
+            } else {
+                debug_info.push(format!("  ❌ Time difference too large ({}s > 1800s)", best_time_diff));
+            }
+        } else {
+            debug_info.push(format!("  ❌ No matching audio file found"));
+        }
+    }
+    
+    debug_info.push(format!("\n=== SUMMARY ==="));
+    debug_info.push(format!("Scanned {} audio files, matched and updated {} meetings with audio paths", audio_files.len(), updated_count));
+    
+    Ok(debug_info.join("\n"))
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
@@ -2519,6 +2706,8 @@ pub fn run() {
             get_audio_file_data,
             get_audio_quality_info,
             export_meeting_data,
+            debug_meeting_audio_paths,
+            update_audio_file_paths,
             greet
         ])
         .run(tauri::generate_context!())
