@@ -525,13 +525,72 @@ const MeetingsManager: React.FC = () => {
                     <FileText className="w-5 h-5 text-blue-500" />
                     Meetings ({meetings.length})
                   </h2>
-                  <button
-                    onClick={() => setShowCreateDialog(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors font-medium"
-                  >
-                    <Plus className="w-4 h-4" />
-                    New Meeting
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowCreateDialog(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors font-medium"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Meeting
+                    </button>
+                    
+                    {/* Test button for table rendering */}
+                    <button
+                      onClick={async () => {
+                        try {
+                          const testMeeting = await invoke<Meeting>('create_meeting', {
+                            title: 'Test Meeting with Table',
+                            language: 'en'
+                          });
+                          
+                          const testMinutes = `# Meeting Summary
+
+This is a test meeting to verify table rendering.
+
+## Action Items
+
+| Task | Assignee | Due Date | Status |
+|------|----------|----------|--------|
+| Review API documentation | John Doe | 2024-01-15 | In Progress |
+| Update mobile app | Jane Smith | 2024-01-20 | Not Started |
+| Test new features | Bob Johnson | 2024-01-18 | Completed |
+
+## Budget Overview
+
+| Category | Allocated | Spent | Remaining |
+|----------|-----------|-------|-----------|
+| Development | $50,000 | $35,000 | $15,000 |
+| Marketing | $20,000 | $12,000 | $8,000 |
+| Operations | $30,000 | $25,000 | $5,000 |
+
+## Next Steps
+
+- Review the action items table above
+- Update budget allocations as needed
+- Schedule follow-up meeting
+
+---
+KEY_TOPICS: API Development, Mobile App, Budget Planning
+SENTIMENT: Positive
+ENERGY: High`;
+
+                          await invoke('save_meeting_minutes_to_database', {
+                            meetingId: testMeeting.id,
+                            meetingMinutes: testMinutes,
+                            aiProvider: 'Test'
+                          });
+                          
+                          setError('✅ Test meeting with tables created successfully!');
+                          loadMeetings();
+                        } catch (error) {
+                          setError(`Failed to create test meeting: ${error}`);
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl transition-colors text-sm"
+                    >
+                      Test Table
+                    </button>
+                  </div>
                 </div>
 
                 {/* Enhanced Search Bar */}
@@ -850,7 +909,8 @@ const MeetingsManager: React.FC = () => {
                       <nav className="-mb-px flex space-x-8">
                         {[
                           { id: 'overview', name: 'Overview', icon: FileText },
-                          { id: 'transcript', name: 'Transcript', icon: MessageSquare },
+                          { id: 'transcript', name: 'Full Transcript', icon: MessageSquare },
+                          { id: 'segments', name: 'Transcript Segments', icon: TrendingUp },
                           { id: 'audio', name: 'Audio', icon: Headphones },
                           { id: 'notes', name: 'Notes', icon: StickyNote }
                         ].map((tab) => (
@@ -887,45 +947,94 @@ const MeetingsManager: React.FC = () => {
                             
                             {selectedMeeting.meeting_minutes ? (
                               <div className="space-y-3">
-                                <div 
-                                  className="text-gray-800 leading-normal prose max-w-none"
-                                  dangerouslySetInnerHTML={{
-                                    __html: selectedMeeting.meeting_minutes
-                                      ?.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                      ?.replace(/\*(.*?)\*/g, '<em>$1</em>')
-                                      ?.replace(/^### (.*$)/gm, '<h3 class="text-lg font-semibold mt-2 mb-1">$1</h3>')
-                                      ?.replace(/^## (.*$)/gm, '<h2 class="text-xl font-bold mt-3 mb-2">$1</h2>')
-                                      ?.replace(/^# (.*$)/gm, '<h1 class="text-2xl font-bold mt-4 mb-2">$1</h1>')
-                                      ?.replace(/^- (.*$)/gm, '<li class="ml-4">$1</li>')
-                                      ?.replace(/(<li.*?>.*?<\/li>)/gs, '<ul class="list-disc list-inside space-y-0.5 my-1">$1</ul>')
-                                      ?.replace(/\n/g, '<br>')
-                                  }}
-                                />
-                                
-                                <div className="space-y-2">
-                                  <h4 className="font-semibold text-base">Key Topics:</h4>
-                                  <div className="flex flex-wrap gap-2">
-                                    {['API Development', 'Mobile App', 'Progress Tracking'].map((topic) => (
-                                      <span key={topic} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
-                                        {topic}
-                                      </span>
-                                    ))}
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-4 text-sm">
-                                    <span className="flex items-center gap-2">
-                                      <span>Sentiment:</span>
-                                      <span className="flex items-center gap-1">
-                                        <Heart className="w-4 h-4 text-green-500" /> <span className="font-medium">Positive</span>
-                                      </span>
-                                    </span>
-                                    <span className="text-gray-400">|</span>
-                                    <span className="flex items-center gap-2">
-                                      <span>Energy:</span>
-                                      <span className="font-medium">High</span>
-                                    </span>
-                                  </div>
+                                <div className="text-gray-800 leading-normal prose prose-sm max-w-none prose-headings:text-gray-900 prose-h1:text-xl prose-h1:font-bold prose-h2:text-lg prose-h2:font-semibold prose-h3:text-base prose-h3:font-medium prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900 prose-table:text-sm">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      table: ({ children }) => (
+                                        <div className="overflow-x-auto my-4">
+                                          <table className="min-w-full divide-y divide-gray-200 border border-gray-300 rounded-lg">
+                                            {children}
+                                          </table>
+                                        </div>
+                                      ),
+                                      thead: ({ children }) => (
+                                        <thead className="bg-gray-50">
+                                          {children}
+                                        </thead>
+                                      ),
+                                      tbody: ({ children }) => (
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                          {children}
+                                        </tbody>
+                                      ),
+                                      tr: ({ children }) => (
+                                        <tr className="hover:bg-gray-50">
+                                          {children}
+                                        </tr>
+                                      ),
+                                      th: ({ children }) => (
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200 last:border-r-0">
+                                          {children}
+                                        </th>
+                                      ),
+                                      td: ({ children }) => (
+                                        <td className="px-4 py-3 text-sm text-gray-900 border-r border-gray-200 last:border-r-0">
+                                          {children}
+                                        </td>
+                                      ),
+                                      code: ({ children, className }) => {
+                                        const match = /language-(\w+)/.exec(className || '');
+                                        return match ? (
+                                          <SyntaxHighlighter
+                                            style={tomorrow}
+                                            language={match[1]}
+                                            PreTag="div"
+                                            className="rounded-lg text-sm"
+                                          >
+                                            {String(children).replace(/\n$/, '')}
+                                          </SyntaxHighlighter>
+                                        ) : (
+                                          <code className="bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-sm font-mono">
+                                            {children}
+                                          </code>
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    {parsedMetadata?.cleanedMinutes || selectedMeeting.meeting_minutes}
+                                  </ReactMarkdown>
                                 </div>
+                                
+                                {parsedMetadata && (
+                                  <div className="space-y-2">
+                                    <h4 className="font-semibold text-base">Key Topics:</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                      {parsedMetadata.keyTopics.map((topic) => (
+                                        <span key={topic} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                                          {topic}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-4 text-sm">
+                                      <span className="flex items-center gap-2">
+                                        <span>Sentiment:</span>
+                                        <span className="flex items-center gap-1">
+                                           {parsedMetadata.sentiment === 'Positive' && <Heart className="w-4 h-4 text-green-500" />}
+                                           {parsedMetadata.sentiment === 'Neutral' && <div className="w-4 h-4 bg-yellow-500 rounded-full"></div>}
+                                           {parsedMetadata.sentiment === 'Negative' && <X className="w-4 h-4 text-red-500" />}
+                                           <span className="font-medium">{parsedMetadata.sentiment}</span>
+                                         </span>
+                                      </span>
+                                      <span className="text-gray-400">|</span>
+                                      <span className="flex items-center gap-2">
+                                        <span>Energy:</span>
+                                        <span className="font-medium">{parsedMetadata.energy}</span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="text-center py-6">
@@ -1061,8 +1170,12 @@ const MeetingsManager: React.FC = () => {
                               <p className="text-gray-500 text-sm mt-1">Transcript will appear here after processing</p>
                             </div>
                           )}
+                        </div>
+                      )}
 
-                          {segments.length > 0 && (
+                      {activeTab === 'segments' && (
+                        <div className="space-y-4">
+                          {segments.length > 0 ? (
                             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                               <div className="p-4 bg-gray-50 border-b border-gray-200">
                                 <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
@@ -1102,6 +1215,14 @@ const MeetingsManager: React.FC = () => {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          ) : (
+                            <div className="text-center py-8">
+                              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <TrendingUp className="w-6 h-6 text-gray-400" />
+                              </div>
+                              <p className="text-gray-600 font-medium">No transcript segments available</p>
+                              <p className="text-gray-500 text-sm mt-1">Segments will appear here after processing</p>
                             </div>
                           )}
                         </div>

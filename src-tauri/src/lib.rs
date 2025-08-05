@@ -326,7 +326,7 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     
     // Try to find a Whisper model file
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let models_dir = home_dir.join("Documents").join("MeetingRecordings").join("models");
+    let models_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings").join("models");
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
     
     // Try multiple model options in order of preference
@@ -768,7 +768,7 @@ async fn start_recording(state: State<'_, AudioState>, app_handle: AppHandle) ->
     
     // Set up output path
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
-    let recordings_dir = home_dir.join("Documents").join("MeetingRecordings");
+    let recordings_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
     std::fs::create_dir_all(&recordings_dir).map_err(|e| e.to_string())?;
     
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -1347,7 +1347,7 @@ async fn save_transcript_to_file(transcript: String, filename: Option<String>) -
     // Create the output directory
     let home_dir = dirs::home_dir()
         .ok_or("Could not find home directory")?;
-    let output_dir = home_dir.join("Documents").join("MeetingRecordings");
+    let output_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
     
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;
@@ -1715,12 +1715,23 @@ Include the following sections:
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
 
+Format the output in clear, professional language with proper headings and bullet points. Use markdown formatting including:
+- **Bold text** for emphasis
+- Bullet points for lists
+- Tables for structured data (use proper markdown table syntax with | separators)
+- Code blocks for technical content
+
+When presenting structured information like action items, deadlines, or data comparisons, use markdown tables with this format:
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Data 1   | Data 2   | Data 3   |
+
+If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
+
 At the end, add a metadata section with:
 6. **Key Topics** - List 3-5 main topics as comma-separated values (e.g., "API Development, Mobile App, Progress Tracking")
 7. **Sentiment** - Overall meeting sentiment (Positive, Neutral, or Negative)
 8. **Energy** - Meeting energy level (High, Medium, or Low)
-
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
 
 IMPORTANT: End your response with exactly this format:
 ---
@@ -1882,7 +1893,7 @@ async fn save_meeting_minutes(meeting_minutes: String, filename: Option<String>)
     // Create the output directory
     let home_dir = dirs::home_dir()
         .ok_or("Could not find home directory")?;
-    let output_dir = home_dir.join("Documents").join("MeetingRecordings");
+    let output_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings");
     
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;

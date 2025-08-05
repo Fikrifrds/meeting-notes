@@ -566,23 +566,41 @@ function App() {
         </div>
       </header>
 
-      {/* Error Banner */}
+      {/* Message Banner */}
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-400 p-4 mx-4 mt-4 rounded-r-lg">
+        <div className={`border-l-4 p-4 mx-4 mt-4 rounded-r-lg ${
+          error.startsWith('✅') || error.startsWith('🔊') 
+            ? 'bg-green-50 border-green-400' 
+            : 'bg-red-50 border-red-400'
+        }`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
+                {error.startsWith('✅') || error.startsWith('🔊') ? (
+                  <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                )}
               </div>
               <div className="ml-3">
-                <p className="text-sm text-red-700">{error}</p>
+                <p className={`text-sm ${
+                  error.startsWith('✅') || error.startsWith('🔊') 
+                    ? 'text-green-700' 
+                    : 'text-red-700'
+                }`}>{error}</p>
               </div>
             </div>
             <button 
               onClick={clearError}
-              className="text-red-400 hover:text-red-600 transition-colors"
+              className={`transition-colors ${
+                error.startsWith('✅') || error.startsWith('🔊') 
+                  ? 'text-green-400 hover:text-green-600' 
+                  : 'text-red-400 hover:text-red-600'
+              }`}
             >
               <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -1112,7 +1130,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center py-6 text-gray-500 text-sm bg-white rounded-2xl shadow-lg border border-gray-200">
-          <p>📁 Files saved to: <span className="font-mono">Documents/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*</span></p>
+          <p>📁 Files saved to: <span className="font-mono">Documents/MeetingRecorder/MeetingRecordings/meeting_{new Date().toISOString().slice(0, 10)}_*</span></p>
         </div>
     </main>
       </div>

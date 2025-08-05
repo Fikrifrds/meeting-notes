@@ -7,7 +7,7 @@ echo "🎙️ Meeting Recorder - Whisper Model Downloader"
 echo "=============================================="
 
 # Create the models directory
-MODELS_DIR="$HOME/Documents/MeetingRecordings/models"
+MODELS_DIR="$HOME/Documents/MeetingRecorder/MeetingRecordings/models"
 mkdir -p "$MODELS_DIR"
 
 echo "📁 Models directory: $MODELS_DIR"
