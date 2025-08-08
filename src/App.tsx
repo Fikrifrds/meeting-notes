@@ -963,7 +963,7 @@ function App() {
                 {isRecording ? 'Stop Recording' : 'Start Recording'}
               </button>
 
-              {lastRecordingPath && whisperInitialized && !isRecording && (
+              {lastRecordingPath && whisperInitialized && !isRecording && !transcript && (
                 <button 
                   className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
                   onClick={transcribeAudio}

@@ -1029,10 +1029,45 @@ const MeetingsManager: React.FC = () => {
                             
                             {selectedMeeting.meeting_minutes ? (
                               <div className="space-y-3">
-                                <div className="text-gray-800 leading-normal prose prose-sm max-w-none prose-headings:text-gray-900 prose-h1:text-xl prose-h1:font-bold prose-h2:text-lg prose-h2:font-semibold prose-h3:text-base prose-h3:font-medium prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900 prose-table:text-sm">
+                                <div className="text-gray-800 leading-normal prose prose-sm max-w-none prose-headings:text-gray-900 prose-h1:text-xl prose-h1:font-bold prose-h1:mb-4 prose-h1:mt-6 prose-h2:text-lg prose-h2:font-semibold prose-h2:mb-3 prose-h2:mt-5 prose-h3:text-base prose-h3:font-medium prose-h3:mb-2 prose-h3:mt-4 prose-p:text-gray-700 prose-p:mb-3 prose-li:text-gray-700 prose-strong:text-gray-900 prose-table:text-sm prose-ul:mb-4 prose-ol:mb-4">
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
                                     components={{
+                                      h1: ({ children }) => (
+                                        <h1 className="text-xl font-bold text-gray-900 mb-4 mt-6 first:mt-0">
+                                          {children}
+                                        </h1>
+                                      ),
+                                      h2: ({ children }) => (
+                                        <h2 className="text-lg font-semibold text-gray-900 mb-3 mt-5 first:mt-0">
+                                          {children}
+                                        </h2>
+                                      ),
+                                      h3: ({ children }) => (
+                                        <h3 className="text-base font-medium text-gray-900 mb-2 mt-4 first:mt-0">
+                                          {children}
+                                        </h3>
+                                      ),
+                                      p: ({ children }) => (
+                                        <p className="text-gray-700 mb-3 leading-relaxed">
+                                          {children}
+                                        </p>
+                                      ),
+                                      ul: ({ children }) => (
+                                        <ul className="list-disc pl-5 mb-4 space-y-1">
+                                          {children}
+                                        </ul>
+                                      ),
+                                      ol: ({ children }) => (
+                                        <ol className="list-decimal pl-5 mb-4 space-y-1">
+                                          {children}
+                                        </ol>
+                                      ),
+                                      li: ({ children }) => (
+                                        <li className="text-gray-700">
+                                          {children}
+                                        </li>
+                                      ),
                                       table: ({ children }) => (
                                         <div className="overflow-x-auto my-4">
                                           <table className="min-w-full divide-y divide-gray-200 border border-gray-300 rounded-lg">
