@@ -13,22 +13,16 @@ import {
   Sparkles, 
   Trash2, 
   Settings, 
-  Save, 
-  X, 
+  X,
+  Heart, 
   Zap, 
   RefreshCw, 
   TestTube, 
   Volume2, 
-  Wrench, 
-  Search, 
   Folder, 
   Upload,
-  CheckCircle,
-  XCircle,
-  Globe,
   Sliders,
   Target,
-  BarChart3,
   Info
 } from 'lucide-react';
 import "./App.css";
@@ -86,6 +80,14 @@ function App() {
   // Audio file upload state
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // AI-generated metadata state
+  const [parsedMetadata, setParsedMetadata] = useState<{
+    keyTopics: string[];
+    sentiment: string;
+    energy: string;
+    cleanedMinutes: string;
+  } | null>(null);
   
   // Audio device selection state
   interface AudioDevice {
@@ -239,6 +241,15 @@ function App() {
       }
     };
   }, []);
+
+  // Parse metadata when meeting minutes change
+  useEffect(() => {
+    if (meetingMinutes) {
+      parseMetadata(meetingMinutes);
+    } else {
+      setParsedMetadata(null);
+    }
+  }, [meetingMinutes]);
 
   const clearError = () => setError(null);
 
@@ -611,30 +622,6 @@ function App() {
 
 
 
-  const handleSave = async () => {
-    try {
-      clearError();
-      
-      // Save audio file
-      await invoke("save_files");
-      
-      // Save transcript if available
-      if (transcript.trim()) {
-        const result = await invoke<string>("save_transcript_to_file", { 
-          transcript: transcript,
-          filename: null 
-        });
-        console.log("Transcript saved:", result);
-        showError(`Files saved successfully!\n${result}`);
-      } else {
-        showError("Audio file saved, but no transcript available to save.");
-      }
-      
-    } catch (error) {
-      console.error("Error saving files:", error);
-      showError(`Error saving files: ${error}`);
-    }
-  };
 
   const toggleSettings = () => {
     setShowSettings(!showSettings);
@@ -710,6 +697,34 @@ function App() {
     clearError();
   };
 
+  // Parse AI-generated metadata from meeting minutes
+  const parseMetadata = (meetingMinutes: string) => {
+    if (!meetingMinutes) {
+      setParsedMetadata(null);
+      return;
+    }
+
+    // Look for the metadata section at the end
+    const metadataMatch = meetingMinutes.match(/---\s*\nKEY_TOPICS:\s*(.+)\s*\nSENTIMENT:\s*(.+)\s*\nENERGY:\s*(.+)\s*$/);
+    
+    if (metadataMatch) {
+      const [, keyTopicsStr, sentiment, energy] = metadataMatch;
+      const keyTopics = keyTopicsStr.split(',').map(topic => topic.trim()).filter(Boolean);
+      
+      // Remove the metadata section from the minutes for clean display
+      const cleanedMinutes = meetingMinutes.replace(/---\s*\nKEY_TOPICS:[\s\S]*$/, '').trim();
+      
+      setParsedMetadata({
+        keyTopics,
+        sentiment: sentiment.trim(),
+        energy: energy.trim(),
+        cleanedMinutes
+      });
+    } else {
+      // Fallback for older format or if parsing fails
+    }
+  };
+
   const testMicrophoneAccess = async () => {
     try {
       clearError();
@@ -734,29 +749,6 @@ function App() {
     }
   };
 
-  const debugAudioPaths = async () => {
-    try {
-      clearError();
-      const result = await invoke<string>("debug_meeting_audio_paths");
-      console.log("Debug audio paths result:", result);
-      showError(`DEBUG: ${result}`);
-    } catch (error) {
-      console.error("Debug audio paths failed:", error);
-      showError(`ERROR: Debug audio paths failed: ${error}`);
-    }
-  };
-
-  const updateAudioPaths = async () => {
-    try {
-      clearError();
-      const result = await invoke<string>("update_audio_file_paths");
-      console.log("Audio paths update result:", result);
-      showError(`UPDATE: ${result}`);
-    } catch (error) {
-      console.error("Audio paths update failed:", error);
-      showError(`ERROR: Audio paths update failed: ${error}`);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -1213,8 +1205,38 @@ function App() {
                     ),
                   }}
                 >
-                  {meetingMinutes}
+                  {parsedMetadata?.cleanedMinutes || meetingMinutes}
                 </ReactMarkdown>
+                
+                {parsedMetadata && (
+                  <div className="space-y-2 mt-6">
+                    <h4 className="font-semibold text-base">Key Topics:</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {parsedMetadata.keyTopics.map((topic) => (
+                        <span key={topic} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                          {topic}
+                        </span>
+                      ))}
+                    </div>
+                    
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="flex items-center gap-2">
+                        <span>Sentiment:</span>
+                        <span className="flex items-center gap-1">
+                           {parsedMetadata.sentiment === 'Positive' && <Heart className="w-4 h-4 text-green-500" />}
+                           {parsedMetadata.sentiment === 'Neutral' && <div className="w-4 h-4 bg-yellow-500 rounded-full"></div>}
+                           {parsedMetadata.sentiment === 'Negative' && <X className="w-4 h-4 text-red-500" />}
+                           <span className="font-medium">{parsedMetadata.sentiment}</span>
+                         </span>
+                      </span>
+                      <span className="text-gray-400">|</span>
+                      <span className="flex items-center gap-2">
+                        <span>Energy:</span>
+                        <span className="font-medium">{parsedMetadata.energy}</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-12">

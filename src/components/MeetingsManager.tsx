@@ -18,12 +18,10 @@ import {
   TrendingUp,
   Heart,
   Search,
-  Plus,
   Trash2,
   Info,
   Settings,
   File,
-  Mic,
   Briefcase,
   CheckCircle,
   AlertCircle,
@@ -356,27 +354,6 @@ const MeetingsManager: React.FC = () => {
   };
 
   // Audio player functions
-  const togglePlayPause = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-    }
-  };
-
-  const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration);
-    }
-  };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
@@ -530,12 +507,6 @@ const MeetingsManager: React.FC = () => {
       });
     } else {
       // Fallback for older format or if parsing fails
-      setParsedMetadata({
-        keyTopics: ['Meeting Discussion', 'Team Collaboration'],
-        sentiment: 'Positive',
-        energy: 'Medium',
-        cleanedMinutes: meetingMinutes
-      });
     }
   };
 
