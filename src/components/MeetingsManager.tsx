@@ -15,13 +15,12 @@ import {
   Globe,
   Bot,
   Calendar,
+  CalendarDays,
   TrendingUp,
   Heart,
   Search,
   Trash2,
   Info,
-  Settings,
-  File,
   Briefcase,
   CheckCircle,
   AlertCircle,
@@ -80,7 +79,6 @@ const MeetingsManager: React.FC = () => {
 
   // AI generation state
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
-  const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
 
   // Delete confirmation modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -104,6 +102,11 @@ const MeetingsManager: React.FC = () => {
     energy: string;
     cleanedMinutes: string;
   } | null>(null);
+  
+  // Date filter state
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
 
   useEffect(() => {
     loadMeetings();
@@ -382,6 +385,43 @@ const MeetingsManager: React.FC = () => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  // Filter meetings based on date filter
+  const getFilteredMeetings = () => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    return meetings.filter(meeting => {
+      const meetingDate = new Date(meeting.created_at);
+      
+      switch (dateFilter) {
+        case 'today':
+          return meetingDate >= today;
+        case 'week':
+          return meetingDate >= weekAgo;
+        case 'month':
+          return meetingDate >= monthAgo;
+        case 'custom':
+          if (customDateFrom && customDateTo) {
+            const fromDate = new Date(customDateFrom);
+            const toDate = new Date(customDateTo + 'T23:59:59'); // End of day
+            return meetingDate >= fromDate && meetingDate <= toDate;
+          } else if (customDateFrom) {
+            const fromDate = new Date(customDateFrom);
+            return meetingDate >= fromDate;
+          } else if (customDateTo) {
+            const toDate = new Date(customDateTo + 'T23:59:59');
+            return meetingDate <= toDate;
+          }
+          return true;
+        default:
+          return true;
+      }
+    });
+  };
+  
+  const filteredMeetings = getFilteredMeetings();
 
   const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -556,10 +596,9 @@ const MeetingsManager: React.FC = () => {
       setError(null);
       setIsGeneratingMinutes(true);
       
-      const command = aiProvider === 'ollama' ? 'generate_meeting_minutes_ollama' : 'generate_meeting_minutes';
       const languageParam = selectedMeeting.language === 'auto' ? null : selectedMeeting.language;
       
-      const result = await invoke<string>(command, { 
+      const result = await invoke<string>('generate_meeting_minutes', { 
         transcript: selectedMeeting.transcript,
         language: languageParam 
       });
@@ -568,11 +607,11 @@ const MeetingsManager: React.FC = () => {
       await invoke('save_meeting_minutes_to_database', {
         meetingId: selectedMeeting.id,
         meetingMinutes: result,
-        aiProvider: aiProvider
+        aiProvider: 'openai'
       });
       
       // Update the selected meeting with new minutes
-      const updatedMeeting = { ...selectedMeeting, meeting_minutes: result, ai_provider: aiProvider };
+      const updatedMeeting = { ...selectedMeeting, meeting_minutes: result, ai_provider: 'openai' };
       setSelectedMeeting(updatedMeeting);
       
       // Update the meetings list
@@ -580,14 +619,14 @@ const MeetingsManager: React.FC = () => {
         m.id === selectedMeeting.id ? updatedMeeting : m
       ));
       
-      setError(`✅ Meeting minutes generated successfully with ${aiProvider.toUpperCase()}!`);
+      setError(`✅ Meeting minutes generated successfully with OpenAI!`);
       
       // Auto-hide success message after 3 seconds
       setTimeout(() => setError(null), 3000);
       
     } catch (error) {
       console.error('Failed to generate meeting minutes:', error);
-      setError(`Failed to generate meeting minutes with ${aiProvider.toUpperCase()}: ${error}`);
+      setError(`Failed to generate meeting minutes with OpenAI: ${error}`);
     } finally {
       setIsGeneratingMinutes(false);
     }
@@ -642,7 +681,7 @@ const MeetingsManager: React.FC = () => {
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
                     <FileText className="w-5 h-5 text-blue-500" />
-                    Meetings ({meetings.length})
+                    Meetings ({filteredMeetings.length}{dateFilter !== 'all' || searchQuery ? ` of ${meetings.length}` : ''})
                   </h2>
                 </div>
 
@@ -673,8 +712,63 @@ const MeetingsManager: React.FC = () => {
                 </div>
               </div>
 
+              {/* Date Filter */}
+              <div className="mb-4">
+                <div className="flex flex-col space-y-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CalendarDays className="h-4 w-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-700">Filter by Date</span>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: 'all', label: 'All' },
+                      { value: 'today', label: 'Today' },
+                      { value: 'week', label: 'Last 7 days' },
+                      { value: 'month', label: 'Last 30 days' },
+                      { value: 'custom', label: 'Custom' }
+                    ].map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => setDateFilter(option.value as any)}
+                        className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
+                          dateFilter === option.value
+                            ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {dateFilter === 'custom' && (
+                    <div className="flex gap-2 mt-2">
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">From</label>
+                        <input
+                          type="date"
+                          value={customDateFrom}
+                          onChange={(e) => setCustomDateFrom(e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">To</label>
+                        <input
+                          type="date"
+                          value={customDateTo}
+                          onChange={(e) => setCustomDateTo(e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Meetings List */}
-              <div className="max-h-96 overflow-y-auto">
+              <div className="max-h-[600px] overflow-y-auto">
                 {isLoading ? (
                   <div className="space-y-4 p-4">
                     {[1, 2, 3].map((i) => (
@@ -695,19 +789,21 @@ const MeetingsManager: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                ) : meetings.length === 0 ? (
+                ) : filteredMeetings.length === 0 ? (
                   <div className="p-8 text-center text-gray-500">
                     <div className="mb-4">
                       <FileText className="w-16 h-16 mx-auto text-gray-300" />
                     </div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No meetings found</h3>
                     <p className="text-gray-500">
-                      {searchQuery ? 'Try a different search term' : 'Create your first meeting to get started'}
+                      {searchQuery ? 'Try a different search term' : 
+                       dateFilter !== 'all' ? 'No meetings found for the selected date range' : 
+                       'Create your first meeting to get started'}
                     </p>
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-100">
-                    {meetings.map((meeting) => (
+                    {filteredMeetings.map((meeting) => (
                       <div
                         key={meeting.id}
                         onClick={() => setSelectedMeeting(meeting)}
@@ -1072,30 +1168,8 @@ const MeetingsManager: React.FC = () => {
                               
                               {/* Generate/Regenerate Button */}
                               <div className="flex items-center gap-3">
-                                {/* AI Provider Selection */}
-                                <div className="flex items-center gap-2 text-sm">
-                                  <label className="flex items-center gap-1">
-                                    <input
-                                      type="radio"
-                                      name="aiProvider"
-                                      value="ollama"
-                                      checked={aiProvider === 'ollama'}
-                                      onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
-                                      className="text-purple-600 focus:ring-purple-500"
-                                    />
-                                    <span className="text-gray-600">Ollama</span>
-                                  </label>
-                                  <label className="flex items-center gap-1">
-                                    <input
-                                      type="radio"
-                                      name="aiProvider"
-                                      value="openai"
-                                      checked={aiProvider === 'openai'}
-                                      onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
-                                      className="text-purple-600 focus:ring-purple-500"
-                                    />
-                                    <span className="text-gray-600">OpenAI</span>
-                                  </label>
+                                <div className="text-sm text-gray-600">
+                                  Meeting minutes generated with OpenAI
                                 </div>
                                 
                                 <button

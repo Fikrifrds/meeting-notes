@@ -7,7 +7,6 @@ use std::thread;
 use std::sync::mpsc;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
-use ollama_rs::{Ollama, generation::completion::request::GenerationRequest};
 use uuid;
 
 mod database;
@@ -1870,73 +1869,6 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
     Ok(meeting_minutes.to_string())
 }
 
-#[tauri::command]
-async fn generate_meeting_minutes_ollama(transcript: String, language: Option<String>) -> Result<String, String> {
-    // Load environment variables
-    dotenv::dotenv().ok();
-    
-    // Get Ollama configuration from environment variables
-    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1:8b".to_string());
-
-    if transcript.trim().is_empty() {
-        return Err("No transcript provided for meeting minutes generation".to_string());
-    }
-
-    // Create the prompt for meeting minutes with language awareness
-    let language_instruction = match language.as_deref() {
-        Some("id") => "Generate the meeting minutes in Indonesian (Bahasa Indonesia). Use professional Indonesian business language.",
-        Some("es") => "Generate the meeting minutes in Spanish. Use professional Spanish business language.",
-        Some("fr") => "Generate the meeting minutes in French. Use professional French business language.",
-        Some("de") => "Generate the meeting minutes in German. Use professional German business language.",
-        Some("it") => "Generate the meeting minutes in Italian. Use professional Italian business language.",
-        Some("pt") => "Generate the meeting minutes in Portuguese. Use professional Portuguese business language.",
-        Some("nl") => "Generate the meeting minutes in Dutch. Use professional Dutch business language.",
-        Some("ru") => "Generate the meeting minutes in Russian. Use professional Russian business language.",
-        Some("ja") => "Generate the meeting minutes in Japanese. Use professional Japanese business language.",
-        Some("ko") => "Generate the meeting minutes in Korean. Use professional Korean business language.",
-        Some("zh") => "Generate the meeting minutes in Chinese. Use professional Chinese business language.",
-        Some("ar") => "Generate the meeting minutes in Arabic. Use professional Arabic business language.",
-        Some("hi") => "Generate the meeting minutes in Hindi. Use professional Hindi business language.",
-        Some("tr") => "Generate the meeting minutes in Turkish. Use professional Turkish business language.",
-        Some("en") | _ => "Generate the meeting minutes in English. Use professional English business language.",
-    };
-
-    let system_prompt = format!(r#"You are an expert meeting assistant. Transform the following meeting transcript into well-structured meeting minutes. {}
-
-Include the following sections:
-
-1. **Meeting Summary** - Brief overview of the meeting
-2. **Key Discussion Points** - Main topics discussed
-3. **Decisions Made** - Any decisions or conclusions reached
-4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
-5. **Next Steps** - Follow-up actions or future meetings
-
-Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
-
-IMPORTANT: End your response with exactly this format:
----
-KEY_TOPICS: [comma-separated list of 3-5 topics]
-SENTIMENT: [Positive/Neutral/Negative]
-ENERGY: [High/Medium/Low]"#, language_instruction);
-
-    let full_prompt = format!("{}\n\nPlease generate meeting minutes from this transcript:\n\n{}", system_prompt, transcript);
-
-    // Initialize Ollama client
-    let ollama = Ollama::try_new(ollama_host)
-        .map_err(|e| format!("Failed to create Ollama client: {}", e))?;
-
-    // Create generation request
-    let request = GenerationRequest::new(ollama_model, full_prompt);
-
-    // Make the API call to Ollama
-    let response = ollama.generate(request).await
-        .map_err(|e| format!("Failed to generate meeting minutes with Ollama: {}", e))?;
-
-    let meeting_minutes = response.response;
-    
-    Ok(meeting_minutes)
-}
 
 #[tauri::command]
 async fn save_meeting_minutes(meeting_minutes: String, filename: Option<String>) -> Result<String, String> {
@@ -3098,7 +3030,6 @@ pub fn run() {
             disable_realtime_transcription,
             get_recording_status,
             generate_meeting_minutes,
-            generate_meeting_minutes_ollama,
             save_meeting_minutes,
             get_gain_settings,
             set_gain_settings,

@@ -73,7 +73,6 @@ function App() {
   const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false);
   const [micGain, setMicGain] = useState(2.5);
   const [systemGain, setSystemGain] = useState(1.5);
-  const [aiProvider, setAiProvider] = useState<'openai' | 'ollama'>('ollama');
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // Default to English
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null); // Track current meeting
   
@@ -636,11 +635,10 @@ function App() {
     try {
       clearError();
       setIsGeneratingMinutes(true);
-      setMeetingMinutes(`Generating meeting minutes with ${aiProvider.toUpperCase()}...`);
+      setMeetingMinutes(`Generating meeting minutes with OpenAI...`);
       
-      const command = aiProvider === 'ollama' ? 'generate_meeting_minutes_ollama' : 'generate_meeting_minutes';
       const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
-      const result = await invoke<string>(command, { 
+      const result = await invoke<string>('generate_meeting_minutes', { 
         transcript,
         language: languageParam 
       });
@@ -654,7 +652,7 @@ function App() {
     } catch (error) {
       console.error("Failed to generate meeting minutes:", error);
       setMeetingMinutes("");
-      showError(`Failed to generate meeting minutes with ${aiProvider.toUpperCase()}: ${error}`);
+      showError(`Failed to generate meeting minutes with OpenAI: ${error}`);
     } finally {
       setIsGeneratingMinutes(false);
     }
@@ -671,7 +669,7 @@ function App() {
       await invoke("save_meeting_minutes_to_database", {
         meetingId: currentMeetingId,
         meetingMinutes: minutes,
-        aiProvider: aiProvider
+        aiProvider: 'openai'
       });
       
       console.log("Meeting minutes auto-saved to database");
@@ -790,21 +788,9 @@ function App() {
                   </div>
                 </div>
 
-                {/* AI Provider Selector */}
-                <div className="relative">
-                  <select
-                    value={aiProvider}
-                    onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
-                    className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 font-medium hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all cursor-pointer"
-                  >
-                    <option value="ollama">Ollama (Local)</option>
-                    <option value="openai">OpenAI (Cloud)</option>
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
+                {/* AI Provider Info */}
+                <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  Using OpenAI for meeting minutes generation
                 </div>
               </div>
 
