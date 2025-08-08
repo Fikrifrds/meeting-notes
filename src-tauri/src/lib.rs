@@ -1811,11 +1811,6 @@ When presenting structured information like action items, deadlines, or data com
 
 If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
 
-At the end, add a metadata section with:
-6. **Key Topics** - List 3-5 main topics as comma-separated values (e.g., "API Development, Mobile App, Progress Tracking")
-7. **Sentiment** - Overall meeting sentiment (Positive, Neutral, or Negative)
-8. **Energy** - Meeting energy level (High, Medium, or Low)
-
 IMPORTANT: End your response with exactly this format:
 ---
 KEY_TOPICS: [comma-separated list of 3-5 topics]
@@ -1916,11 +1911,6 @@ Include the following sections:
 3. **Decisions Made** - Any decisions or conclusions reached
 4. **Action Items** - Tasks assigned with responsible parties (if mentioned)
 5. **Next Steps** - Follow-up actions or future meetings
-
-At the end, add a metadata section with:
-6. **Key Topics** - List 3-5 main topics as comma-separated values (e.g., "API Development, Mobile App, Progress Tracking")
-7. **Sentiment** - Overall meeting sentiment (Positive, Neutral, or Negative)
-8. **Energy** - Meeting energy level (High, Medium, or Low)
 
 Format the output in clear, professional language with proper headings and bullet points. If specific names or roles aren't mentioned, use generic terms like "Participant A", "Team Member", etc. Maintain the same language throughout the entire document.
 
