@@ -1872,15 +1872,7 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
 
     let meeting_minutes = &openai_response.choices[0].message.content;
     
-    // Add simple metadata header
-    let now = chrono::Utc::now();
-    let formatted_minutes = format!(
-        "# Meeting Minutes\n\n**Generated:** {}\n**Source:** Audio Transcript\n\n---\n\n{}",
-        now.format("%Y-%m-%d %H:%M:%S UTC"),
-        meeting_minutes
-    );
-
-    Ok(formatted_minutes)
+    Ok(meeting_minutes.to_string())
 }
 
 #[tauri::command]
@@ -1953,15 +1945,7 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
 
     let meeting_minutes = response.response;
     
-    // Add simple metadata header
-    let now = chrono::Utc::now();
-    let formatted_minutes = format!(
-        "# Meeting Minutes\n\n**Generated:** {}\n**Source:** Audio Transcript (Ollama Local AI)\n\n---\n\n{}",
-        now.format("%Y-%m-%d %H:%M:%S UTC"),
-        meeting_minutes
-    );
-
-    Ok(formatted_minutes)
+    Ok(meeting_minutes)
 }
 
 #[tauri::command]
