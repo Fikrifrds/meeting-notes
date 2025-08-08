@@ -93,7 +93,11 @@ const MeetingsManager: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [showAudioPlayer, setShowAudioPlayer] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isSyncEnabled, setIsSyncEnabled] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const segmentsContainerRef = useRef<HTMLDivElement>(null);
 
   // AI-generated metadata state
   const [parsedMetadata, setParsedMetadata] = useState<{
@@ -107,17 +111,19 @@ const MeetingsManager: React.FC = () => {
     loadMeetings();
   }, []);
 
-  useEffect(() => {
-    if (selectedMeeting?.audio_file_path) {
-      loadAudioFile(selectedMeeting.audio_file_path);
-    } else {
-      setAudioDataUrl(null);
-    }
-  }, [selectedMeeting]);
+  // Remove automatic audio loading - now it's lazy loaded when user clicks show audio player
 
   useEffect(() => {
     if (selectedMeeting) {
       loadMeetingSegments(selectedMeeting.id);
+      // Reset audio player state when meeting changes
+      setShowAudioPlayer(false);
+      setAudioDataUrl(null);
+      setCurrentTime(0);
+      setDuration(0);
+      setIsPlaying(false);
+      setIsSyncEnabled(false);
+      setLastScrolledSegmentId(null);
     }
   }, [selectedMeeting]);
 
@@ -249,6 +255,7 @@ const MeetingsManager: React.FC = () => {
 
   const loadAudioFile = async (audioFilePath: string) => {
     try {
+      setIsLoadingAudio(true);
       const audioData = await invoke<number[]>('get_audio_file_data', {
         filePath: audioFilePath
       });
@@ -266,7 +273,50 @@ const MeetingsManager: React.FC = () => {
       setAudioDataUrl(null);
       setCurrentTime(0);
       setDuration(0);
+    } finally {
+      setIsLoadingAudio(false);
     }
+  };
+
+  const toggleAudioPlayer = async () => {
+    if (!showAudioPlayer && selectedMeeting?.audio_file_path && !audioDataUrl) {
+      // Lazy load audio when showing player for the first time
+      await loadAudioFile(selectedMeeting.audio_file_path);
+    }
+    setShowAudioPlayer(!showAudioPlayer);
+  };
+
+  const toggleSync = (enabled: boolean) => {
+    setIsSyncEnabled(enabled);
+    setLastScrolledSegmentId(null); // Reset scroll tracking
+    if (enabled) {
+      // Auto-switch to segments tab when sync is enabled
+      setActiveTab('segments');
+    }
+  };
+
+  const getCurrentSegment = () => {
+    if (!isSyncEnabled || !segments.length) return null;
+    
+    // Add tolerance for better matching (0.5 seconds buffer)
+    const tolerance = 0.5;
+    
+    // First try exact match
+    let matchingSegment = segments.find(segment => 
+      currentTime >= (segment.start_time - tolerance) && 
+      currentTime <= (segment.end_time + tolerance)
+    );
+    
+    // If no exact match, find the closest segment
+    if (!matchingSegment) {
+      matchingSegment = segments.reduce((closest, segment) => {
+        const currentDistance = Math.abs(currentTime - segment.start_time);
+        const closestDistance = Math.abs(currentTime - closest.start_time);
+        return currentDistance < closestDistance ? segment : closest;
+      });
+    }
+    
+    return matchingSegment;
   };
 
   const handleAudioTimeUpdate = () => {
@@ -343,6 +393,7 @@ const MeetingsManager: React.FC = () => {
       setCurrentTime(startTime);
       if (!isPlaying) {
         audioRef.current.play();
+        setIsPlaying(true);
       }
     }
   };
@@ -497,6 +548,27 @@ const MeetingsManager: React.FC = () => {
     }
   }, [selectedMeeting?.meeting_minutes]);
 
+  // Auto-scroll to current segment when sync is active
+  const [lastScrolledSegmentId, setLastScrolledSegmentId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (isSyncEnabled && activeTab === 'segments' && segmentsContainerRef.current) {
+      const currentSegment = getCurrentSegment();
+      if (currentSegment && currentSegment.id !== lastScrolledSegmentId) {
+        const segmentElement = segmentsContainerRef.current.querySelector(
+          `[data-segment-id="${currentSegment.id}"]`
+        );
+        if (segmentElement) {
+          segmentElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+          setLastScrolledSegmentId(currentSegment.id);
+        }
+      }
+    }
+  }, [currentTime, isSyncEnabled, activeTab, segments, lastScrolledSegmentId]);
+
   // Generate or regenerate meeting minutes
   const generateMeetingMinutes = async () => {
     if (!selectedMeeting) {
@@ -556,19 +628,6 @@ const MeetingsManager: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                  <Mic className="w-7 h-7 text-white" />
-                </div>
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-purple-800 bg-clip-text text-transparent">
-                  Meeting Studio
-                </h1>
-              </div>
-              <p className="text-gray-600 text-lg font-medium">
-                Your intelligent meeting companion - record, transcribe, and analyze with AI
-              </p>
-            </div>
             <div className="text-right">
               <div className="inline-flex items-center gap-2 px-4 py-2 bg-white bg-opacity-60 backdrop-blur-sm rounded-xl border border-gray-200 shadow-sm">
                 <Briefcase className="w-4 h-4 text-gray-500" />
@@ -876,47 +935,6 @@ const MeetingsManager: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex flex-wrap gap-3">
-                      {selectedMeeting.audio_file_path && audioDataUrl && (
-                        <div className="w-full space-y-3 p-4 bg-gray-50 rounded-xl">
-                          <div className="flex items-center gap-3">
-                            <button 
-                              onClick={handlePlayPause}
-                              className="inline-flex items-center justify-center w-12 h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors shadow-lg hover:shadow-xl"
-                            >
-                              {isPlaying ? (
-                                <Pause className="w-6 h-6" />
-                              ) : (
-                                <Play className="w-6 h-6 ml-1" />
-                              )}
-                            </button>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm font-medium text-gray-700">
-                                  {formatTime(currentTime)}
-                                </span>
-                                <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                  <div 
-                                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                                    style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                                  ></div>
-                                </div>
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max={duration || 0}
-                                  value={currentTime}
-                                  onChange={handleSeek}
-                                  className="absolute inset-0 w-full h-3 opacity-0 cursor-pointer"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-xs text-gray-500 flex items-center gap-1">
-                            <Headphones className="w-3 h-3" />
-                            Audio Recording - Click and drag to seek
-                          </div>
-                        </div>
-                      )}
                       <button 
                         onClick={() => setShowExportDialog(true)}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl transition-colors font-medium"
@@ -924,7 +942,121 @@ const MeetingsManager: React.FC = () => {
                         <Download className="w-4 h-4" />
                         Export Meeting
                       </button>
+                      
+                      {selectedMeeting?.audio_file_path && (
+                        <button
+                          onClick={toggleAudioPlayer}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors font-medium"
+                        >
+                          <Headphones className="w-4 h-4" />
+                          {showAudioPlayer ? 'Hide Audio Player' : 'Show Audio Player'}
+                          {isLoadingAudio && <Loader className="w-4 h-4 animate-spin ml-1" />}
+                        </button>
+                      )}
                     </div>
+
+                    {/* Collapsible Audio Player */}
+                    {selectedMeeting?.audio_file_path && showAudioPlayer && (
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-2xl p-4 border border-blue-200">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                            <Music className="w-5 h-5 text-white" />
+                          </div>
+                          <h3 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                            <Headphones className="w-5 h-5" />
+                            Audio Recording
+                          </h3>
+                          <span className="text-sm text-gray-500">High Quality</span>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="text-sm text-gray-600 bg-white/50 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                              <span className="font-medium flex-shrink-0">File:</span>
+                              <span className="font-mono text-xs break-all">{selectedMeeting.audio_file_path.split('/').pop()}</span>
+                            </div>
+                          </div>
+
+                          {isLoadingAudio ? (
+                            <div className="text-center py-6">
+                              <Loader className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-500" />
+                              <p className="text-gray-600">Loading audio...</p>
+                            </div>
+                          ) : audioDataUrl ? (
+                            <div className="bg-white rounded-xl p-3 shadow-sm">
+                              <audio
+                                ref={audioRef}
+                                src={audioDataUrl}
+                                onTimeUpdate={handleAudioTimeUpdate}
+                                onLoadedMetadata={handleAudioLoadedMetadata}
+                                onPlay={() => setIsPlaying(true)}
+                                onPause={() => setIsPlaying(false)}
+                                className="hidden"
+                              />
+
+                              <div className="flex items-center gap-4">
+                                <button
+                                  onClick={handlePlayPause}
+                                  className="w-12 h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center transition-colors"
+                                >
+                                  {isPlaying ? (
+                                    <Pause className="w-6 h-6" />
+                                  ) : (
+                                    <Play className="w-6 h-6 ml-1" />
+                                  )}
+                                </button>
+
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-sm font-medium text-gray-700">
+                                      {formatTime(currentTime)}
+                                    </span>
+                                    <div className="flex-1 bg-gray-200 rounded-full h-2 relative">
+                                      <div 
+                                        className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                                        style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                                      />
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max={duration || 0}
+                                        value={currentTime}
+                                        onChange={handleSeek}
+                                        className="absolute inset-0 w-full h-2 opacity-0 cursor-pointer"
+                                      />
+                                    </div>
+                                    <span className="text-sm text-gray-500">
+                                      {formatTime(duration)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    id="sync-transcript"
+                                    checked={isSyncEnabled}
+                                    onChange={(e) => toggleSync(e.target.checked)}
+                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <label htmlFor="sync-transcript" className="text-sm text-gray-700">
+                                    Sync with transcript
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center py-6">
+                              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <Music className="w-6 h-6 text-gray-400" />
+                              </div>
+                              <p className="text-gray-600 font-medium">Click "Show Audio Player" to load audio</p>
+                              <p className="text-gray-500 text-sm mt-1">Audio will be loaded on demand</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Tabs */}
                     <div className="border-b border-gray-200">
@@ -933,7 +1065,6 @@ const MeetingsManager: React.FC = () => {
                           { id: 'overview', name: 'Overview', icon: FileText },
                           { id: 'transcript', name: 'Full Transcript', icon: MessageSquare },
                           { id: 'segments', name: 'Transcript Segments', icon: TrendingUp },
-                          { id: 'audio', name: 'Audio', icon: Headphones },
                           { id: 'notes', name: 'Notes', icon: StickyNote }
                         ].map((tab) => (
                           <button
@@ -1166,103 +1297,6 @@ const MeetingsManager: React.FC = () => {
                         </div>
                       )}
 
-                      {activeTab === 'audio' && (
-                        <div className="space-y-4">
-                          {/* Audio Player */}
-                          <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-2xl p-4 border border-blue-200">
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-                                <Music className="w-5 h-5 text-white" />
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
-                                <Headphones className="w-5 h-5" />
-                                Audio Recording
-                              </h3>
-                              <span className="text-sm text-gray-500">High Quality • Synced with transcript</span>
-                            </div>
-
-                            {selectedMeeting.audio_file_path ? (
-                              <div className="space-y-3">
-                                <div className="text-sm text-gray-600 bg-white/50 rounded-lg p-3">
-                                  <span className="font-medium">File:</span> {selectedMeeting.audio_file_path}
-                                </div>
-
-                                {audioDataUrl && (
-                                  <div className="bg-white rounded-xl p-3 shadow-sm">
-                                    <audio
-                                      ref={audioRef}
-                                      src={audioDataUrl}
-                                      onTimeUpdate={handleTimeUpdate}
-                                      onLoadedMetadata={handleLoadedMetadata}
-                                      onPlay={() => setIsPlaying(true)}
-                                      onPause={() => setIsPlaying(false)}
-                                      className="hidden"
-                                    />
-
-                                    <div className="flex items-center gap-4">
-                                      <button
-                                        onClick={togglePlayPause}
-                                        className="w-12 h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center transition-colors"
-                                      >
-                                        {isPlaying ? (
-                                          <Pause className="w-6 h-6" />
-                                        ) : (
-                                          <Play className="w-6 h-6 ml-1" />
-                                        )}
-                                      </button>
-
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-2">
-                                          <span className="text-sm font-medium text-gray-700">
-                                            {formatTime(currentTime)}
-                                          </span>
-                                          <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                            <div 
-                                              className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                                              style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                                            />
-                                          </div>
-                                          <span className="text-sm text-gray-500">
-                                            {formatTime(duration)}
-                                          </span>
-                                        </div>
-                                        <input
-                                          type="range"
-                                          min="0"
-                                          max={duration || 0}
-                                          value={currentTime}
-                                          onChange={handleSeek}
-                                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
-                                        />
-                                      </div>
-
-                                      <div className="flex items-center gap-2">
-                                        <input
-                                          type="checkbox"
-                                          id="sync-transcript"
-                                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                          defaultChecked
-                                        />
-                                        <label htmlFor="sync-transcript" className="text-sm text-gray-700">
-                                          Sync with transcript
-                                        </label>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-center py-6">
-                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                                  <Music className="w-6 h-6 text-gray-400" />
-                                </div>
-                                <p className="text-gray-600 font-medium">No audio recording available</p>
-                                <p className="text-gray-500 text-sm mt-1">Audio will appear here after recording</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
 
                       {activeTab === 'transcript' && (
                         <div className="space-y-4">
@@ -1295,42 +1329,78 @@ const MeetingsManager: React.FC = () => {
                           {segments.length > 0 ? (
                             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                               <div className="p-4 bg-gray-50 border-b border-gray-200">
-                                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                  <TrendingUp className="w-5 h-5" />
-                                  Transcript Segments
-                                </h3>
+                                <div className="flex items-center justify-between">
+                                  <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                                    <TrendingUp className="w-5 h-5" />
+                                    Transcript Segments
+                                  </h3>
+                                  {isSyncEnabled && (
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                                      <span className="text-blue-600 font-medium">Sync Active</span>
+                                    </div>
+                                  )}
+                                </div>
+                                {isSyncEnabled && (
+                                  <p className="text-xs text-gray-600 mt-2">
+                                    Click any segment to jump to that time in the audio. Currently playing segment is highlighted and auto-scrolled.
+                                  </p>
+                                )}
                               </div>
-                              <div className="max-h-96 overflow-y-auto">
-                                {segments.map((segment, index) => (
-                                  <div
-                                    key={segment.id}
-                                    className="p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
-                                    onClick={() => jumpToSegment(segment.start_time)}
-                                  >
-                                    <div className="flex items-start gap-3">
-                                      <div className="flex-shrink-0">
-                                        <span className="inline-flex items-center justify-center w-8 h-8 bg-blue-100 text-blue-600 rounded-full text-sm font-medium">
-                                          {index + 1}
-                                        </span>
-                                      </div>
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-2">
-                                          <span className="text-sm font-medium text-blue-600">
-                                            {formatTime(segment.start_time)} - {formatTime(segment.end_time)}
+                              <div className="max-h-96 overflow-y-auto" ref={segmentsContainerRef}>
+                                {segments.map((segment, index) => {
+                                  const currentSegment = getCurrentSegment();
+                                  const isCurrentSegment = isSyncEnabled && currentSegment?.id === segment.id;
+                                  
+                                  return (
+                                    <div
+                                      key={segment.id}
+                                      data-segment-id={segment.id}
+                                      className={`p-4 border-b border-gray-100 cursor-pointer transition-colors ${
+                                        isCurrentSegment 
+                                          ? 'bg-blue-50 border-blue-200 shadow-sm' 
+                                          : 'hover:bg-gray-50'
+                                      }`}
+                                      onClick={() => jumpToSegment(segment.start_time)}
+                                    >
+                                      <div className="flex items-start gap-3">
+                                        <div className="flex-shrink-0">
+                                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
+                                            isCurrentSegment 
+                                              ? 'bg-blue-500 text-white' 
+                                              : 'bg-blue-100 text-blue-600'
+                                          }`}>
+                                            {index + 1}
                                           </span>
-                                          {segment.confidence && (
-                                            <span className="text-xs text-gray-500">
-                                              ({Math.round(segment.confidence * 100)}% confidence)
-                                            </span>
-                                          )}
                                         </div>
-                                        <p className="text-gray-700 leading-relaxed">
-                                          {segment.text}
-                                        </p>
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-2 mb-2">
+                                            <span className={`text-sm font-medium ${
+                                              isCurrentSegment ? 'text-blue-700' : 'text-blue-600'
+                                            }`}>
+                                              {formatTime(segment.start_time)} - {formatTime(segment.end_time)}
+                                            </span>
+                                            {segment.confidence && (
+                                              <span className="text-xs text-gray-500">
+                                                ({Math.round(segment.confidence * 100)}% confidence)
+                                              </span>
+                                            )}
+                                            {isCurrentSegment && (
+                                              <span className="text-xs bg-blue-500 text-white px-2 py-1 rounded-full font-medium">
+                                                Playing
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className={`leading-relaxed ${
+                                            isCurrentSegment ? 'text-gray-900 font-medium' : 'text-gray-700'
+                                          }`}>
+                                            {segment.text}
+                                          </p>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           ) : (

@@ -23,11 +23,7 @@ import {
   Folder, 
   Upload,
   CheckCircle,
-  AlertTriangle,
   XCircle,
-  Cloud,
-  Home,
-  Lock,
   Globe,
   Sliders,
   Target,
@@ -764,59 +760,114 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
-                <Mic className="text-white w-6 h-6" />
+      <header className="bg-white/95 backdrop-blur-lg border-b border-gray-100 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-3">
+          {/* Top Row */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-4">
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                <Mic className="text-white w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Meeting Recorder</h1>
-                <p className="text-sm text-gray-500">Professional audio transcription</p>
+                <h1 className="text-xl font-semibold text-gray-900">Meeting Recorder</h1>
+                <p className="text-xs text-gray-500">Professional audio transcription</p>
               </div>
             </div>
             
-            <div className="flex items-center space-x-6">
-              {/* Navigation Tabs */}
-              <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
-                <button
-                  onClick={() => setCurrentView('recording')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
-                    currentView === 'recording'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>Recording</span>
-                </button>
-                <button
-                  onClick={() => setCurrentView('meetings')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
-                    currentView === 'meetings'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>Meetings</span>
-                </button>
+            <div className="flex items-center space-x-4">
+              {/* Quick Settings */}
+              <div className="flex items-center space-x-3">
+                {/* Language Selector */}
+                <div className="relative">
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 font-medium hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all cursor-pointer"
+                  >
+                    {supportedLanguages.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* AI Provider Selector */}
+                <div className="relative">
+                  <select
+                    value={aiProvider}
+                    onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
+                    className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-2 pr-8 text-sm text-gray-700 font-medium hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all cursor-pointer"
+                  >
+                    <option value="ollama">Ollama (Local)</option>
+                    <option value="openai">OpenAI (Cloud)</option>
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
               </div>
-              
-              {/* Status Indicator */}
+
+              {/* Settings Button */}
+              <button 
+                className="text-gray-600 hover:text-gray-900 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                onClick={toggleSettings}
+                title="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          
+          {/* Bottom Row */}
+          <div className="flex items-center justify-between">
+            {/* Navigation Tabs */}
+            <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setCurrentView('recording')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  currentView === 'recording'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <Mic className="w-4 h-4" />
+                <span>Recording</span>
+              </button>
+              <button
+                onClick={() => setCurrentView('meetings')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
+                  currentView === 'meetings'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>Meetings</span>
+              </button>
+            </div>
+            
+            {/* Status Indicator */}
+            <div className="flex items-center space-x-3">
+              {isRecording && (
+                <div className="text-xs text-gray-500 bg-orange-100 text-orange-700 px-3 py-1 rounded-full border border-orange-200">
+                  {recordingStatus}
+                  {isRealtimeEnabled && " • Real-time"}
+                </div>
+              )}
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
+                <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
                 <span className="text-sm font-medium text-gray-700">
                   {isRecording ? 'Recording' : 'Ready'}
                 </span>
               </div>
-              {isRecording && (
-                <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                  {recordingStatus}
-                  {isRealtimeEnabled && " • Real-time ON"}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -896,86 +947,106 @@ function App() {
             </div>
 
             {/* Controls */}
-            <div className="flex flex-wrap justify-center gap-4">
+            <div className="space-y-6">
+              {/* Initialization Button */}
               {!whisperInitialized && (
-                <button 
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
-                  onClick={initializeWhisper}
-                >
-                  <Zap className="w-4 h-4 mr-2" />
-                  Initialize Whisper
-                </button>
-              )}
-
-              {/* Audio File Upload */}
-              {whisperInitialized && !isRecording && (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="audio/*,.wav,.mp3,.mp4,.m4a"
-                    onChange={handleAudioUpload}
-                    className="hidden"
-                    disabled={isUploadingAudio}
-                  />
+                <div className="flex justify-center">
                   <button 
-                    className="bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
-                    onClick={triggerFileUpload}
-                    disabled={isUploadingAudio}
+                    className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white px-8 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
+                    onClick={initializeWhisper}
                   >
-                    <Upload className="w-4 h-4 mr-2" />
-                    {isUploadingAudio ? 'Uploading...' : 'Upload Audio File'}
+                    <Zap className="w-5 h-5 mr-2" />
+                    Initialize Whisper
                   </button>
-                </>
+                </div>
               )}
-              
-              {whisperInitialized && !isRecording && (
-                <button
-                  className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center ${
-                    isRealtimeEnabled 
-                      ? 'bg-green-500 hover:bg-green-600 text-white' 
-                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                  }`}
-                  onClick={toggleRealtimeTranscription}
-                >
-                  {isRealtimeEnabled ? (
-                    <div className="w-3 h-3 bg-red-400 rounded-full mr-2"></div>
-                  ) : (
-                    <Zap className="w-4 h-4 mr-2" />
-                  )}
-                  {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
-                </button>
-              )}
-              
-              <button
-                className={`px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center ${
-                  isRecording 
-                    ? 'bg-red-500 hover:bg-red-600 text-white' 
-                    : 'bg-blue-500 hover:bg-blue-600 text-white'
-                }`}
-                onClick={isRecording ? stopRecording : startRecording}
-              >
-                {isRecording ? (
-                  <Square className="w-5 h-5 mr-2" />
-                ) : (
-                  <Play className="w-5 h-5 mr-2" />
-                )}
-                {isRecording ? 'Stop Recording' : 'Start Recording'}
-              </button>
 
-              {lastRecordingPath && whisperInitialized && !isRecording && !transcript && (
-                <button 
-                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
-                  onClick={transcribeAudio}
-                  disabled={isTranscribing}
-                >
-                  {isTranscribing ? (
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <FileText className="w-4 h-4 mr-2" />
+              {/* Main Recording Controls */}
+              {whisperInitialized && (
+                <>
+                  {/* Primary Controls */}
+                  <div className="flex justify-center">
+                    <button
+                      className={`px-12 py-4 rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 shadow-xl flex items-center ${
+                        isRecording 
+                          ? 'bg-red-500 hover:bg-red-600 text-white' 
+                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }`}
+                      onClick={isRecording ? stopRecording : startRecording}
+                    >
+                      {isRecording ? (
+                        <Square className="w-6 h-6 mr-3" />
+                      ) : (
+                        <Play className="w-6 h-6 mr-3" />
+                      )}
+                      {isRecording ? 'Stop Recording' : 'Start Recording'}
+                    </button>
+                  </div>
+
+                  {/* Secondary Controls */}
+                  {!isRecording && (
+                    <div className="flex flex-wrap justify-center gap-3">
+                      {/* Audio File Upload */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="audio/*,.wav,.mp3,.mp4,.m4a"
+                        onChange={handleAudioUpload}
+                        className="hidden"
+                        disabled={isUploadingAudio}
+                      />
+                      <button 
+                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-5 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                        onClick={triggerFileUpload}
+                        disabled={isUploadingAudio}
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        {isUploadingAudio ? 'Uploading...' : 'Upload Audio File'}
+                      </button>
+                      
+                      <button
+                        className={`px-5 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg flex items-center ${
+                          isRealtimeEnabled 
+                            ? 'bg-orange-500 hover:bg-orange-600 text-white' 
+                            : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                        }`}
+                        onClick={toggleRealtimeTranscription}
+                      >
+                        {isRealtimeEnabled ? (
+                          <div className="w-3 h-3 bg-red-400 rounded-full mr-2 animate-pulse"></div>
+                        ) : (
+                          <Zap className="w-4 h-4 mr-2" />
+                        )}
+                        {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
+                      </button>
+
+                      {lastRecordingPath && !transcript && (
+                        <button 
+                          className="bg-indigo-500 hover:bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                          onClick={transcribeAudio}
+                          disabled={isTranscribing}
+                        >
+                          {isTranscribing ? (
+                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <FileText className="w-4 h-4 mr-2" />
+                          )}
+                          {isTranscribing ? `Transcribing... ${Math.round(transcriptionProgress)}%` : 'Transcribe Audio'}
+                        </button>
+                      )}
+
+                      {(transcript || lastRecordingPath) && (
+                        <button 
+                          className="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg flex items-center"
+                          onClick={handleClearAll}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Clear All
+                        </button>
+                      )}
+                    </div>
                   )}
-                  {isTranscribing ? `Transcribing... ${Math.round(transcriptionProgress)}%` : 'Transcribe Audio'}
-                </button>
+                </>
               )}
             </div>
           </div>
@@ -1074,31 +1145,6 @@ function App() {
 
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap justify-center gap-4 mb-8">
-          <button 
-            className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
-            onClick={handleClearAll}
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Clear All
-          </button>
-          <button 
-            className="bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
-            onClick={toggleSettings}
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Settings
-          </button>
-          <button 
-            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center"
-            onClick={handleSave}
-            disabled={!transcript}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            Save Files
-          </button>
-        </div>
 
         {/* Settings Panel */}
         {showSettings && (
@@ -1140,146 +1186,6 @@ function App() {
                   </label>
                 </div>
 
-                {/* AI Provider Selection */}
-                <div className="space-y-4">
-                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
-                    <Bot className="w-5 h-5 mr-2" />
-                    AI Provider for Meeting Minutes
-                  </h4>
-                  <div className="space-y-3">
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="aiProvider"
-                        value="ollama"
-                        checked={aiProvider === 'ollama'}
-                        onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-700 font-medium flex items-center">
-                          <Home className="w-4 h-4 mr-2" />
-                          Ollama (Local)
-                        </span>
-                        <p className="text-sm text-gray-500">Private, runs locally on your device. Requires Ollama installation.</p>
-                      </div>
-                    </label>
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="aiProvider"
-                        value="openai"
-                        checked={aiProvider === 'openai'}
-                        onChange={(e) => setAiProvider(e.target.value as 'openai' | 'ollama')}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-gray-700 font-medium flex items-center">
-                          <Cloud className="w-4 h-4 mr-2" />
-                          OpenAI (Cloud)
-                        </span>
-                        <p className="text-sm text-gray-500">Fast and reliable. Requires API key and sends transcript to OpenAI.</p>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  {aiProvider === 'ollama' && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex items-start space-x-2">
-                        <Lock className="text-green-600 w-5 h-5 mt-0.5" />
-                        <div>
-                          <h5 className="font-medium text-green-900">Privacy First</h5>
-                          <p className="text-sm text-green-700 mt-1">
-                            Your transcript never leaves your device. Requires Ollama to be running locally.
-                          </p>
-                          <p className="text-xs text-green-600 mt-2 flex items-center">
-                            <Info className="w-3 h-3 mr-1" />
-                            Make sure Ollama is installed and running with a model like llama3.1:8b
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {aiProvider === 'openai' && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <div className="flex items-start space-x-2">
-                        <AlertTriangle className="text-yellow-600 w-5 h-5 mt-0.5" />
-                        <div>
-                          <h5 className="font-medium text-yellow-900">Privacy Notice</h5>
-                          <p className="text-sm text-yellow-700 mt-1">
-                            Transcript text will be sent to OpenAI for processing. Requires valid API key.
-                          </p>
-                          <p className="text-xs text-yellow-600 mt-2 flex items-center">
-                            <Info className="w-3 h-3 mr-1" />
-                            Set OPENAI_API_KEY in your .env file
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Language Selection */}
-                <div className="space-y-4">
-                  <h4 className="text-lg font-semibold text-gray-800 flex items-center">
-                    <Globe className="w-5 h-5 mr-2" />
-                    Transcription Language
-                  </h4>
-                  <div className="space-y-2">
-                    <label htmlFor="language-select" className="block text-sm font-medium text-gray-700">
-                      Select Language for Transcription:
-                    </label>
-                    <select
-                      id="language-select"
-                      value={selectedLanguage}
-                      onChange={(e) => setSelectedLanguage(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                    >
-                      {supportedLanguages.map((lang) => (
-                        <option key={lang.code} value={lang.code}>
-                          {lang.name}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-xs text-gray-500 mt-1 flex items-center">
-                      <Info className="w-3 h-3 mr-1" />
-                      Choose "Auto-detect" to let Whisper automatically identify the language, or select a specific language for better accuracy.
-                    </div>
-                  </div>
-                  
-                  {selectedLanguage === 'id' && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex items-start space-x-2">
-                        <Target className="text-green-600 w-5 h-5 mt-0.5" />
-                        <div>
-                          <h5 className="font-medium text-green-900">Indonesian Language Support</h5>
-                          <p className="text-sm text-green-700 mt-1">
-                            Optimized for Indonesian (Bahasa Indonesia) transcription. Works best with multilingual Whisper models.
-                          </p>
-                          <p className="text-xs text-green-600 mt-2 flex items-center">
-                            <Info className="w-3 h-3 mr-1" />
-                            Recommended models: Large V3, Medium, or Small (avoid Turbo for best accuracy)
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {selectedLanguage === 'auto' && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="flex items-start space-x-2">
-                        <Search className="text-blue-600 w-5 h-5 mt-0.5" />
-                        <div>
-                          <h5 className="font-medium text-blue-900">Auto-detect Language</h5>
-                          <p className="text-sm text-blue-700 mt-1">
-                            Whisper will automatically detect the spoken language. This works well for most languages but may be less accurate than specifying the exact language.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 {/* Audio Gain Settings */}
                 <div className="space-y-6">
@@ -1464,21 +1370,21 @@ function App() {
                       Test Audio System
                     </button>
                     
-                    <button 
+                    {/* <button 
                       className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={updateAudioPaths}
                     >
                       <Wrench className="w-4 h-4 mr-2" />
                       Fix Audio Paths
-                    </button>
-                    
+                    </button> */}
+{/*                     
                     <button 
                       className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={debugAudioPaths}
                     >
                       <Search className="w-4 h-4 mr-2" />
                       Debug Audio Paths
-                    </button>
+                    </button> */}
                   </div>
                 </div>
               </div>
