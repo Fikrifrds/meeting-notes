@@ -2453,31 +2453,240 @@ async fn export_meeting_data(
         Vec::new()
     };
     
-    // Create export directory
+    // Create main export directory with meeting-specific folder
     let home_dir = dirs::home_dir()
         .ok_or("Could not find home directory")?;
-    let export_dir = home_dir.join("Documents").join("MeetingRecorder").join("exports");
-    std::fs::create_dir_all(&export_dir)
-        .map_err(|e| format!("Failed to create export directory: {}", e))?;
+    let base_export_dir = home_dir.join("Documents").join("MeetingRecorder").join("exports");
     
-    // Generate filename
+    // Generate safe folder name
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let safe_title = meeting.title.chars()
         .map(|c| if c.is_alphanumeric() || c == ' ' { c } else { '_' })
         .collect::<String>()
         .replace(' ', "_");
     
-    let filename = format!("{}_{}.{}", safe_title, timestamp, options.format);
-    let file_path = export_dir.join(&filename);
+    let meeting_folder = format!("{}_{}", safe_title, timestamp);
+    let export_dir = base_export_dir.join(&meeting_folder);
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export directory: {}", e))?;
     
-    match options.format.as_str() {
-        "txt" => export_as_txt(&meeting, &segments, &options, &file_path)?,
-        "json" => export_as_json(&meeting, &segments, &options, &file_path)?,
-        "md" => export_as_markdown(&meeting, &segments, &options, &file_path)?,
-        _ => return Err(format!("Unsupported export format: {}", options.format)),
+    let mut exported_files = Vec::new();
+    
+    // Export Full Transcript as TXT file
+    if options.include_transcript && meeting.transcript.is_some() {
+        let transcript_file = export_dir.join("full_transcript.txt");
+        export_full_transcript(&meeting, &transcript_file)?;
+        exported_files.push("Full Transcript (txt)".to_string());
     }
     
-    Ok(format!("Meeting data exported to: {}", file_path.display()))
+    // Export Meeting Minutes as MD file
+    if options.include_summary && meeting.meeting_minutes.is_some() {
+        let minutes_file = export_dir.join("meeting_minutes.md");
+        export_meeting_minutes(&meeting, &minutes_file)?;
+        exported_files.push("Meeting Minutes (md)".to_string());
+    }
+    
+    // Export Transcript Segments as VTT and TXT files
+    if options.include_segments && !segments.is_empty() {
+        let segments_dir = export_dir.join("transcript_segments");
+        std::fs::create_dir_all(&segments_dir)
+            .map_err(|e| format!("Failed to create segments directory: {}", e))?;
+        
+        let vtt_file = segments_dir.join("segments.vtt");
+        let txt_file = segments_dir.join("segments.txt");
+        
+        export_segments_as_vtt(&segments, &vtt_file)?;
+        export_segments_as_txt(&segments, &txt_file)?;
+        exported_files.push("Transcript Segments (vtt/txt)".to_string());
+    }
+    
+    // Export Audio File Info as TXT file
+    if options.include_audio {
+        let audio_info_file = export_dir.join("audio_file_info.txt");
+        export_audio_info(&meeting, &audio_info_file)?;
+        exported_files.push("Audio File Info (txt)".to_string());
+    }
+    
+    let files_exported = if exported_files.is_empty() {
+        "No files selected for export".to_string()
+    } else {
+        exported_files.join(", ")
+    };
+    
+    Ok(format!("Meeting exported to folder: {}\nExported: {}", export_dir.display(), files_exported))
+}
+
+// Macro to simplify error handling for write operations
+macro_rules! write_line {
+    ($file:expr, $($arg:tt)*) => {
+        writeln!($file, $($arg)*).map_err(|e| e.to_string())?
+    };
+}
+
+// New export functions for organized folder structure
+fn export_full_transcript(meeting: &Meeting, file_path: &std::path::Path) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    if let Some(transcript) = &meeting.transcript {
+        let mut file = File::create(file_path)
+            .map_err(|e| format!("Failed to create transcript file: {}", e))?;
+        
+        write_line!(file, "MEETING TRANSCRIPT");
+        write_line!(file, "==================");
+        write_line!(file, "");
+        write_line!(file, "Meeting: {}", meeting.title);
+        write_line!(file, "Date: {}", meeting.created_at);
+        write_line!(file, "Duration: {} seconds", meeting.duration_seconds.unwrap_or(0));
+        write_line!(file, "");
+        write_line!(file, "TRANSCRIPT");
+        write_line!(file, "---------");
+        write_line!(file, "");
+        write_line!(file, "{}", transcript);
+        
+        Ok(())
+    } else {
+        Err("No transcript available for this meeting".to_string())
+    }
+}
+
+fn export_meeting_minutes(meeting: &Meeting, file_path: &std::path::Path) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    if let Some(minutes) = &meeting.meeting_minutes {
+        let mut file = File::create(file_path)
+            .map_err(|e| format!("Failed to create meeting minutes file: {}", e))?;
+        
+        // Write the meeting minutes in markdown format
+        write_line!(file, "# Meeting Minutes: {}", meeting.title);
+        write_line!(file, "");
+        write_line!(file, "**Date:** {}", meeting.created_at);
+        write_line!(file, "**Duration:** {} seconds", meeting.duration_seconds.unwrap_or(0));
+        if let Some(language) = &meeting.language {
+            write_line!(file, "**Language:** {}", language);
+        }
+        if let Some(ai_provider) = &meeting.ai_provider {
+            write_line!(file, "**AI Provider:** {}", ai_provider);
+        }
+        write_line!(file, "");
+        write_line!(file, "---");
+        write_line!(file, "");
+        write_line!(file, "{}", minutes);
+        
+        Ok(())
+    } else {
+        Err("No meeting minutes available for this meeting".to_string())
+    }
+}
+
+fn export_segments_as_vtt(segments: &[MeetingSegment], file_path: &std::path::Path) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create VTT file: {}", e))?;
+    
+    write_line!(file, "WEBVTT");
+    write_line!(file, "");
+    
+    for (i, segment) in segments.iter().enumerate() {
+        let start_time = format_vtt_time(segment.start_time);
+        let end_time = format_vtt_time(segment.end_time);
+        
+        write_line!(file, "{}", i + 1);
+        write_line!(file, "{} --> {}", start_time, end_time);
+        write_line!(file, "{}", segment.text);
+        write_line!(file, "");
+    }
+    
+    Ok(())
+}
+
+fn export_segments_as_txt(segments: &[MeetingSegment], file_path: &std::path::Path) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create segments text file: {}", e))?;
+    
+    write_line!(file, "TIMESTAMPED TRANSCRIPT SEGMENTS");
+    write_line!(file, "===============================");
+    write_line!(file, "");
+    
+    for segment in segments {
+        let start_time = format_time_readable(segment.start_time);
+        let end_time = format_time_readable(segment.end_time);
+        
+        write_line!(file, "[{} - {}] {}", start_time, end_time, segment.text);
+        write_line!(file, "");
+    }
+    
+    Ok(())
+}
+
+fn export_audio_info(meeting: &Meeting, file_path: &std::path::Path) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    
+    let mut file = File::create(file_path)
+        .map_err(|e| format!("Failed to create audio info file: {}", e))?;
+    
+    write_line!(file, "AUDIO FILE INFORMATION");
+    write_line!(file, "======================");
+    write_line!(file, "");
+    write_line!(file, "Meeting: {}", meeting.title);
+    write_line!(file, "Date: {}", meeting.created_at);
+    write_line!(file, "Duration: {} seconds", meeting.duration_seconds.unwrap_or(0));
+    write_line!(file, "");
+    
+    if let Some(audio_path) = &meeting.audio_file_path {
+        write_line!(file, "Audio File Path: {}", audio_path);
+        
+        // Try to get file size if file exists
+        if let Ok(metadata) = std::fs::metadata(audio_path) {
+            let file_size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+            write_line!(file, "File Size: {:.2} MB", file_size_mb);
+        }
+    } else {
+        write_line!(file, "Audio File Path: Not available");
+    }
+    
+    if let Some(language) = &meeting.language {
+        write_line!(file, "Transcription Language: {}", language);
+    }
+    
+    write_line!(file, "");
+    write_line!(file, "Metadata:");
+    write_line!(file, "- Meeting ID: {}", meeting.id);
+    write_line!(file, "- Created: {}", meeting.created_at);
+    write_line!(file, "- Updated: {}", meeting.updated_at);
+    
+    Ok(())
+}
+
+// Helper functions for time formatting
+fn format_vtt_time(seconds: f64) -> String {
+    let total_seconds = seconds as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+    let millis = ((seconds - total_seconds as f64) * 1000.0) as u64;
+    
+    format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, secs, millis)
+}
+
+fn format_time_readable(seconds: f64) -> String {
+    let total_seconds = seconds as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+    
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, minutes, secs)
+    } else {
+        format!("{:02}:{:02}", minutes, secs)
+    }
 }
 
 fn export_as_txt(

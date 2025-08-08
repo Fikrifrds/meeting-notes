@@ -1566,40 +1566,6 @@ const MeetingsManager: React.FC = () => {
                   <p className="text-sm text-gray-600">Duration: {formatDuration(selectedMeeting.duration_seconds)}</p>
                 </div>
 
-                {/* Export Format */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">Export Format</label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { value: 'md', label: 'Markdown', icon: MessageSquare, desc: 'Rich formatting' },
-                      { value: 'txt', label: 'Text', icon: File, desc: 'Plain text' },
-                      { value: 'json', label: 'JSON', icon: Settings, desc: 'Structured data' }
-                    ].map((format) => (
-                      <label key={format.value} className="cursor-pointer">
-                        <input
-                          type="radio"
-                          name="format"
-                          value={format.value}
-                          checked={exportOptions.format === format.value}
-                          onChange={(e) => setExportOptions({...exportOptions, format: e.target.value})}
-                          className="sr-only"
-                        />
-                        <div className={`p-3 rounded-lg border-2 text-center transition-colors ${
-                          exportOptions.format === format.value
-                            ? 'border-blue-500 bg-blue-50 text-blue-700'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}>
-                          <div className="flex justify-center mb-1">
-                            <format.icon className="w-5 h-5" />
-                          </div>
-                          <div className="font-medium text-sm">{format.label}</div>
-                          <div className="text-xs text-gray-500">{format.desc}</div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Export Options */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-3">Include in Export</label>
