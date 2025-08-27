@@ -1,0 +1,352 @@
+name: Build and Release with Models
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+  TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+jobs:
+  build-with-models:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
+            name: 'macOS Universal'
+            ext: 'dmg'
+          - platform: 'ubuntu-22.04'
+            args: ''
+            name: 'Linux'
+            ext: 'AppImage'
+          - platform: 'windows-latest'
+            args: ''
+            name: 'Windows'
+            ext: 'msi'
+
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+    
+    - name: Install Linux dependencies
+      if: matrix.platform == 'ubuntu-22.04'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+    
+    - name: Create models directory
+      run: mkdir -p bundled-models
+    
+    - name: Download Whisper Models
+      run: |
+        echo "📥 Downloading Whisper models for bundling..."
+        
+        # Download essential models
+        models=(
+          "ggml-large-v3.bin:https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+          "ggml-base.en.bin:https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+          "ggml-small.bin:https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+        )
+        
+        for model_info in "${models[@]}"; do
+          model_name="${model_info%%:*}"
+          model_url="${model_info##*:}"
+          
+          echo "Downloading $model_name..."
+          curl -L --progress-bar -o "bundled-models/$model_name" "$model_url" || {
+            echo "⚠️  Failed to download $model_name, continuing without it"
+            rm -f "bundled-models/$model_name"
+          }
+          
+          # Verify download
+          if [ -f "bundled-models/$model_name" ] && [ -s "bundled-models/$model_name" ]; then
+            echo "✅ Downloaded $model_name ($(du -h bundled-models/$model_name | cut -f1))"
+          fi
+        done
+        
+        echo "📊 Total models size: $(du -sh bundled-models | cut -f1)"
+    
+    - name: Install frontend dependencies
+      run: npm install
+    
+    - name: Build Tauri app
+      uses: tauri-apps/tauri-action@v0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tagName: ${{ github.ref_name || github.event.inputs.version }}
+        releaseName: 'Meeting Recorder ${{ github.ref_name || github.event.inputs.version }}'
+        releaseBody: |
+          ## 🎙️ Meeting Recorder ${{ github.ref_name || github.event.inputs.version }}
+          
+          **Ready-to-use release with pre-bundled AI models!**
+          
+          ### ✨ What's Included
+          - 🎯 Complete Meeting Recorder application
+          - 🤖 Pre-downloaded Whisper AI models (ready for offline transcription)
+          - ⚙️ Automatic setup and configuration
+          - 📱 One-click installation
+          
+          ### 🚀 Quick Install
+          ```bash
+          curl -sSL https://raw.githubusercontent.com/Fikrifrds/meeting-notes/main/install.sh | bash
+          ```
+          
+          ### 📦 Manual Installation
+          1. Download the appropriate package for your platform
+          2. Run the installer or extract and run the setup script
+          3. Launch Meeting Recorder - everything is ready to use!
+          
+          ### 🎯 Features Ready Out of the Box
+          - ✅ Audio recording with visual feedback
+          - ✅ Real-time AI transcription (Whisper models included)
+          - ✅ AI meeting minutes generation
+          - ✅ Cloud AI support (OpenAI integrated)
+          - ✅ Multiple language support
+          - ✅ Export capabilities
+          
+          ### 🔧 Technical Details
+          - **Models Included**: Large-v3 (multilingual), Small (fast), Base.en (compact)
+          - **Total Size**: ~4.5GB (includes all models for offline use)
+          - **Supported Platforms**: macOS, Linux, Windows
+          - **Data Location**: `~/Documents/MeetingRecorder/`
+          
+          ### 🆕 New in This Release
+          - Pre-bundled Whisper models for immediate use
+          - One-command installation script
+          - Improved setup process
+          - Better cross-platform support
+          
+          **No more waiting for model downloads - just install and start recording! 🎉**
+        releaseDraft: false
+        prerelease: false
+        args: ${{ matrix.args }}
+    
+    - name: Bundle models with app (macOS)
+      if: matrix.platform == 'macos-latest'
+      run: |
+        echo "📦 Bundling models with macOS app..."
+        
+        # Find the built app
+        APP_PATH=$(find src-tauri/target/*/release/bundle/macos -name "*.app" | head -n 1)
+        if [ -n "$APP_PATH" ]; then
+          echo "Found app at: $APP_PATH"
+          
+          # Create models directory in app bundle
+          MODELS_DIR="$APP_PATH/Contents/Resources/models"
+          mkdir -p "$MODELS_DIR"
+          
+          # Copy models
+          cp bundled-models/* "$MODELS_DIR/" 2>/dev/null || echo "No models to copy"
+          
+          echo "✅ Models bundled with macOS app"
+          echo "📊 App bundle size: $(du -sh "$APP_PATH" | cut -f1)"
+        fi
+    
+    - name: Create Linux portable package
+      if: matrix.platform == 'ubuntu-22.04'
+      run: |
+        echo "📦 Creating Linux portable package..."
+        
+        # Create portable structure
+        mkdir -p dist-portable/meeting-recorder-portable/{bin,data/models,data/recordings}
+        
+        # Copy AppImage
+        APPIMAGE_PATH=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
+        if [ -n "$APPIMAGE_PATH" ]; then
+          cp "$APPIMAGE_PATH" dist-portable/meeting-recorder-portable/bin/meeting-recorder.AppImage
+          chmod +x dist-portable/meeting-recorder-portable/bin/meeting-recorder.AppImage
+        fi
+        
+        # Copy models
+        cp bundled-models/* dist-portable/meeting-recorder-portable/data/models/ 2>/dev/null || echo "No models to copy"
+        
+        # Create launcher script
+        cat > dist-portable/meeting-recorder-portable/meeting-recorder << 'EOF'
+        #!/bin/bash
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        DATA_DIR="$SCRIPT_DIR/data"
+        
+        # Setup user data directory
+        USER_DATA_DIR="$HOME/Documents/MeetingRecorder"
+        mkdir -p "$USER_DATA_DIR/MeetingRecordings/models"
+        mkdir -p "$USER_DATA_DIR/exports"
+        
+        # Copy models if they don't exist
+        if [ ! -f "$USER_DATA_DIR/MeetingRecordings/models/ggml-large-v3.bin" ]; then
+            cp "$DATA_DIR/models"/* "$USER_DATA_DIR/MeetingRecordings/models/" 2>/dev/null
+            echo "✅ Whisper models set up in $USER_DATA_DIR/MeetingRecordings/models/"
+        fi
+        
+        cd "$USER_DATA_DIR"
+        "$SCRIPT_DIR/bin/meeting-recorder.AppImage" "$@"
+        EOF
+        
+        chmod +x dist-portable/meeting-recorder-portable/meeting-recorder
+        
+        # Create installer
+        cat > dist-portable/meeting-recorder-portable/install.sh << 'EOF'
+        #!/bin/bash
+        echo "🐧 Installing Meeting Recorder for Linux"
+        echo "======================================="
+        
+        INSTALL_DIR="$HOME/.local/share/meeting-recorder"
+        BIN_DIR="$HOME/.local/bin"
+        
+        mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+        cp -R * "$INSTALL_DIR/"
+        ln -sf "$INSTALL_DIR/meeting-recorder" "$BIN_DIR/meeting-recorder"
+        
+        # Desktop entry
+        DESKTOP_FILE="$HOME/.local/share/applications/meeting-recorder.desktop"
+        mkdir -p "$(dirname "$DESKTOP_FILE")"
+        cat > "$DESKTOP_FILE" << 'DESKTOP_EOF'
+        [Desktop Entry]
+        Name=Meeting Recorder
+        Comment=AI-powered meeting recorder with real-time transcription
+        Exec=$HOME/.local/bin/meeting-recorder
+        Terminal=false
+        Type=Application
+        Categories=Office;AudioVideo;
+        DESKTOP_EOF
+        
+        echo "✅ Installation completed!"
+        echo "🚀 Run 'meeting-recorder' or find it in your applications menu"
+        EOF
+        
+        chmod +x dist-portable/meeting-recorder-portable/install.sh
+        
+        # Create archive
+        cd dist-portable
+        tar -czf meeting-recorder-portable-linux.tar.gz meeting-recorder-portable/
+        
+        echo "✅ Created portable Linux package"
+        echo "📊 Package size: $(du -sh meeting-recorder-portable-linux.tar.gz | cut -f1)"
+    
+    - name: Upload portable package (Linux)
+      if: matrix.platform == 'ubuntu-22.04'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./dist-portable/meeting-recorder-portable-linux.tar.gz
+        asset_name: meeting-recorder-portable-linux.tar.gz
+        asset_content_type: application/gzip
+    
+    - name: Generate checksums
+      run: |
+        echo "🔐 Generating checksums..."
+        
+        # Find built artifacts
+        find src-tauri/target -name "*.dmg" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.deb" | while read file; do
+          if [ -f "$file" ]; then
+            echo "$(shasum -a 256 "$file" | cut -d' ' -f1)  $(basename "$file")" >> checksums.txt
+          fi
+        done
+        
+        # Add portable package checksum
+        if [ -f "dist-portable/meeting-recorder-portable-linux.tar.gz" ]; then
+          echo "$(shasum -a 256 "dist-portable/meeting-recorder-portable-linux.tar.gz" | cut -d' ' -f1)  meeting-recorder-portable-linux.tar.gz" >> checksums.txt
+        fi
+        
+        if [ -f "checksums.txt" ]; then
+          echo "📋 Generated checksums:"
+          cat checksums.txt
+        fi
+    
+    - name: Upload checksums
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: checksums-${{ matrix.name }}
+        path: checksums.txt
+        if-no-files-found: ignore
+
+  create-installer-assets:
+    needs: build-with-models
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create installation assets
+      run: |
+        echo "📝 Creating installation documentation..."
+        
+        # Make install script executable
+        chmod +x install.sh
+        
+        # Create quick start guide
+        cat > QUICK_START.md << 'EOF'
+        # 🚀 Meeting Recorder - Quick Start
+        
+        ## One-Command Installation
+        
+        ```bash
+        curl -sSL https://raw.githubusercontent.com/Fikrifrds/meeting-notes/main/install.sh | bash
+        ```
+        
+        ## What This Does
+        
+        ✅ Downloads and installs Meeting Recorder for your platform  
+        ✅ Sets up Whisper AI models (3+ GB) for offline transcription  
+        ✅ Creates data directories and configuration files  
+        ✅ Installs desktop shortcuts and launchers  
+        ✅ Optionally installs Ollama for local AI processing  
+        
+        ## Manual Installation
+        
+        1. Download the package for your platform from the releases page
+        2. Extract and run the included installer script
+        3. Launch Meeting Recorder
+        
+        ## Ready-to-Use Features
+        
+        - 🎙️ **Audio Recording**: High-quality recording with visual feedback
+        - 🤖 **AI Transcription**: Offline transcription using bundled Whisper models
+        - 📝 **Meeting Minutes**: AI-generated summaries and action items  
+        - 🏠 **Local AI**: Complete privacy with Ollama integration
+        - ☁️ **Cloud AI**: Fast results with OpenAI (API key required)
+        - 🌍 **Multi-language**: Support for 50+ languages
+        
+        ## Data Location
+        
+        All your meetings are stored in: `~/Documents/MeetingRecorder/`
+        
+        ## Support
+        
+        - 📖 [Full Documentation](https://github.com/Fikrifrds/meeting-notes)
+        - 🐛 [Report Issues](https://github.com/Fikrifrds/meeting-notes/issues)
+        - 💡 [Feature Requests](https://github.com/Fikrifrds/meeting-notes/discussions)
+        EOF
+    
+    - name: Upload installation assets
+      uses: actions/upload-artifact@v4
+      with:
+        name: installation-assets
+        path: |
+          install.sh
+          QUICK_START.md
+          README.md

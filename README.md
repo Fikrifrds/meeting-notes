@@ -6,9 +6,8 @@ A modern desktop application for recording meetings with real-time transcription
 
 - 🎙️ **Audio Recording**: High-quality audio recording with visual feedback
 - 📝 **Real-time Transcription**: AI-powered transcription using Whisper
-- 🤖 **AI Meeting Minutes**: Generate meeting minutes with OpenAI or Ollama
-- 🏠 **Local AI Support**: Use Ollama for completely private, offline AI processing
-- ☁️ **Cloud AI Option**: OpenAI integration for fast, reliable results
+- 🤖 **AI Meeting Minutes**: Generate meeting minutes with OpenAI
+- ☁️ **Cloud AI**: OpenAI integration for fast, reliable results
 - ⏱️ **Timer Display**: Live recording timer with formatted time display
 - 🎨 **Modern UI**: Clean, responsive interface with audio visualization
 - 💾 **File Management**: Automatic saving of audio files and transcripts
@@ -103,41 +102,6 @@ This command will:
 
 ## AI Provider Configuration
 
-The application supports two AI providers for generating meeting minutes from transcripts:
-
-### 🏠 Ollama (Local AI) - Recommended for Privacy
-
-**Advantages:**
-- ✅ Complete privacy - no data leaves your device
-- ✅ No internet required for AI processing
-- ✅ No API costs or rate limits
-- ✅ Works offline
-
-**Setup:**
-
-1. **Install Ollama**: Download from [ollama.ai](https://ollama.ai/)
-
-2. **Download a model** (choose one):
-   ```bash
-   # Recommended: Fast and efficient
-   ollama pull llama3.2:3b
-   
-   # Alternative: More capable but slower
-   ollama pull llama3.1:8b
-   ```
-
-3. **Configure environment** (copy from `.env.example`):
-   ```bash
-   # Copy example configuration
-   cp .env.example .env
-   
-   # Edit .env file with your preferred model
-   OLLAMA_HOST=http://localhost:11434
-   OLLAMA_MODEL=llama3.2:3b
-   ```
-
-4. **Select in app**: Choose "Ollama (Local)" in the settings panel
-
 ### ☁️ OpenAI (Cloud AI) - Fast and Reliable
 
 **Advantages:**
@@ -146,33 +110,11 @@ The application supports two AI providers for generating meeting minutes from tr
 - ✅ No local setup required
 
 **Setup:**
-
-1. **Get API key**: Sign up at [platform.openai.com](https://platform.openai.com/api-keys)
-
-2. **Configure environment**:
-   ```bash
-   # Edit .env file
-   OPENAI_API_KEY=sk-your-api-key-here
-   OPENAI_MODEL=gpt-4o-mini
-   OPENAI_MAX_TOKENS=2000
-   OPENAI_TEMPERATURE=0.3
-   ```
-
-3. **Select in app**: Choose "OpenAI (Cloud)" in the settings panel
+- Pre-configured with OpenAI API integration
+- Ready to use for AI meeting minutes generation
+- No additional configuration needed
 
 **Privacy Notice**: Transcript text will be sent to OpenAI for processing.
-
-### Switching Between Providers
-
-You can easily switch between AI providers in the application:
-
-1. Open **Settings** (⚙️ icon)
-2. Find **"🤖 AI Provider for Meeting Minutes"** section
-3. Select your preferred option:
-   - **Ollama (Local)** - Private, offline processing
-   - **OpenAI (Cloud)** - Fast, cloud-based processing
-
-The application will remember your choice and use the selected provider for all future meeting minutes generation.
 
 ## Development Workflow
 

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use chrono::{DateTime, Utc, Timelike};
 use whisper_rs::{WhisperContext, WhisperContextParameters};
 use std::thread;
@@ -327,6 +327,9 @@ async fn initialize_whisper(state: State<'_, AudioState>) -> Result<String, Stri
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let models_dir = home_dir.join("Documents").join("MeetingRecorder").join("MeetingRecordings").join("models");
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    
+    // Auto-setup: Check if models exist, if not try to set them up automatically
+    auto_setup_models(&models_dir)?;
     
     // Try multiple model options in order of preference
     // Note: Prioritizing multilingual models for better Indonesian support
@@ -3004,6 +3007,105 @@ async fn update_audio_file_paths(
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Auto-setup models from bundled resources or download them
+fn auto_setup_models(models_dir: &Path) -> Result<(), String> {
+    println!("🔍 Auto-setup: Checking for Whisper models...");
+    
+    // Check if any model already exists
+    let model_files = ["ggml-large-v3.bin", "ggml-base.en.bin", "ggml-small.bin"];
+    for model_file in &model_files {
+        if models_dir.join(model_file).exists() {
+            println!("✅ Found existing model: {}", model_file);
+            return Ok(());
+        }
+    }
+    
+    // Try to copy models from app bundle (macOS/Linux) or installation directory
+    if let Ok(exe_path) = std::env::current_exe() {
+        let exe_dir = exe_path.parent().unwrap_or_else(|| Path::new("."));
+        
+        // Check various possible bundle locations
+        let bundle_locations = [
+            exe_dir.join("../Resources/models"), // macOS app bundle
+            exe_dir.join("models"),              // Linux/Windows adjacent
+            exe_dir.join("../models"),           // Alternative location
+            exe_dir.join("../../models"),        // Development location
+        ];
+        
+        for bundle_dir in &bundle_locations {
+            if bundle_dir.exists() {
+                println!("🎯 Found bundled models at: {:?}", bundle_dir);
+                
+                // Copy all model files
+                if let Ok(entries) = std::fs::read_dir(bundle_dir) {
+                    let mut copied_any = false;
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let file_name = entry.file_name();
+                            let file_name_str = file_name.to_string_lossy();
+                            
+                            if file_name_str.starts_with("ggml-") && file_name_str.ends_with(".bin") {
+                                let src = entry.path();
+                                let dest = models_dir.join(&file_name);
+                                
+                                if !dest.exists() {
+                                    match std::fs::copy(&src, &dest) {
+                                        Ok(size) => {
+                                            println!("✅ Copied model: {} ({} bytes)", file_name_str, size);
+                                            copied_any = true;
+                                        }
+                                        Err(e) => {
+                                            println!("⚠️  Failed to copy {}: {}", file_name_str, e);
+                                        }
+                                    }
+                                } else {
+                                    println!("✅ Model already exists: {}", file_name_str);
+                                    copied_any = true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if copied_any {
+                        println!("✅ Auto-setup completed: Models copied from bundle");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    
+    // If no bundled models found, show download instructions
+    println!("⚠️  No Whisper models found. Please download a model:");
+    println!("   Run: ./download-whisper-model.sh");
+    println!("   Or manually download to: {:?}", models_dir);
+    println!("   Recommended: ggml-large-v3.bin for best multilingual support");
+    
+    // Create a helpful message file
+    let instructions_file = models_dir.join("DOWNLOAD_MODELS.txt");
+    let instructions = format!(
+        "Whisper Models Required\n\
+        =======================\n\n\
+        To use transcription features, please download a Whisper model:\n\n\
+        Option 1 - Automatic download:\n\
+        ./download-whisper-model.sh\n\n\
+        Option 2 - Manual download:\n\
+        Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main\n\
+        Save to: {:?}\n\n\
+        Recommended models:\n\
+        • ggml-large-v3.bin (3.1GB) - Best accuracy, multilingual\n\
+        • ggml-base.en.bin (142MB) - Fast, English only\n\
+        • ggml-small.bin (466MB) - Good balance, multilingual\n",
+        models_dir
+    );
+    
+    if let Err(e) = std::fs::write(&instructions_file, instructions) {
+        println!("⚠️  Could not create instructions file: {}", e);
+    }
+    
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
