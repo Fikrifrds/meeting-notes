@@ -29,3 +29,8 @@ venv
 .env
 .env.local
 .env.production
+
+# Build artifacts
+pkg-installer-build/
+src-tauri/target/
+src-tauri/gen/

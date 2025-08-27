@@ -258,12 +258,12 @@ download_whisper_models() {
     
     local models_dir="$APP_DIR/MeetingRecordings/models"
     
-    # Download recommended model (large-v3 for best multilingual support)
-    local model_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
-    local model_file="$models_dir/ggml-large-v3.bin"
+    # Download recommended model (large-v3-turbo for best speed/quality balance)
+    local model_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+    local model_file="$models_dir/ggml-large-v3-turbo.bin"
     
     if [ ! -f "$model_file" ]; then
-        log_info "Downloading large-v3 model (3.1GB) - this may take a few minutes..."
+        log_info "Downloading large-v3-turbo model (1.5GB) - this may take a few minutes..."
         curl -L --progress-bar -o "$model_file" "$model_url"
         
         if [ -f "$model_file" ] && [ -s "$model_file" ]; then

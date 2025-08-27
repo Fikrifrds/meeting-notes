@@ -39,7 +39,7 @@ download_models() {
     
     # Model configurations
     declare -A models=(
-        ["ggml-large-v3.bin"]="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+        ["ggml-large-v3-turbo.bin"]="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
         ["ggml-base.en.bin"]="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
         ["ggml-small.bin"]="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
     )
@@ -236,7 +236,7 @@ if [ -z "$MEETING_RECORDER_PORTABLE" ]; then
     mkdir -p "$USER_DATA_DIR/exports"
     
     # Copy models if they don't exist
-    if [ ! -f "$USER_DATA_DIR/MeetingRecordings/models/ggml-large-v3.bin" ] && [ -f "$DATA_DIR/models/ggml-large-v3.bin" ]; then
+    if [ ! -f "$USER_DATA_DIR/MeetingRecordings/models/ggml-large-v3-turbo.bin" ] && [ -f "$DATA_DIR/models/ggml-large-v3-turbo.bin" ]; then
         cp "$DATA_DIR/models"/* "$USER_DATA_DIR/MeetingRecordings/models/"
         echo "✅ Whisper models copied to $USER_DATA_DIR/MeetingRecordings/models/"
     fi
