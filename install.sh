@@ -65,22 +65,99 @@ install_dependencies() {
     
     log_info "Installing system dependencies for $platform..."
     
+    # Install Node.js if not present
+    if ! command -v node &> /dev/null; then
+        log_info "Installing Node.js..."
+        case $platform in
+            "macos")
+                # Install Homebrew if needed
+                if ! command -v brew &> /dev/null; then
+                    log_info "Installing Homebrew first..."
+                    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                    # Add Homebrew to PATH for current session
+                    if [[ -f /opt/homebrew/bin/brew ]]; then
+                        eval "$(/opt/homebrew/bin/brew shellenv)"
+                    elif [[ -f /usr/local/bin/brew ]]; then
+                        eval "$(/usr/local/bin/brew shellenv)"
+                    fi
+                fi
+                brew install node
+                ;;
+            "linux")
+                if command -v apt &> /dev/null; then
+                    sudo apt update
+                    sudo apt install -y curl wget unzip
+                    # Install Node.js via NodeSource
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+                    sudo apt-get install -y nodejs
+                elif command -v yum &> /dev/null; then
+                    sudo yum install -y curl wget unzip
+                    # Install Node.js via NodeSource
+                    curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+                    sudo yum install -y nodejs
+                elif command -v pacman &> /dev/null; then
+                    sudo pacman -S curl wget unzip nodejs npm
+                fi
+                ;;
+            "windows")
+                log_warning "Please install Node.js manually from https://nodejs.org/"
+                log_warning "Then re-run this installer"
+                exit 1
+                ;;
+        esac
+        
+        # Verify Node.js installation
+        if command -v node &> /dev/null; then
+            log_success "Node.js installed successfully: $(node --version)"
+        else
+            log_error "Failed to install Node.js"
+            exit 1
+        fi
+    else
+        log_success "Node.js already installed: $(node --version)"
+    fi
+    
+    # Install Rust if not present
+    if ! command -v cargo &> /dev/null; then
+        log_info "Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        
+        # Source Rust environment
+        if [[ -f ~/.cargo/env ]]; then
+            source ~/.cargo/env
+        fi
+        
+        # Verify Rust installation
+        if command -v cargo &> /dev/null; then
+            log_success "Rust installed successfully: $(rustc --version)"
+        else
+            log_error "Failed to install Rust"
+            log_info "Please restart your terminal and re-run the installer"
+            exit 1
+        fi
+    else
+        log_success "Rust already installed: $(rustc --version)"
+    fi
+    
+    # Install platform-specific dependencies
     case $platform in
-        "macos")
-            # Check if Homebrew is installed
-            if ! command -v brew &> /dev/null; then
-                log_info "Installing Homebrew..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            fi
-            ;;
         "linux")
             if command -v apt &> /dev/null; then
-                sudo apt update
-                sudo apt install -y curl wget unzip
+                sudo apt install -y build-essential libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
             elif command -v yum &> /dev/null; then
-                sudo yum install -y curl wget unzip
+                sudo yum groupinstall -y "Development Tools"
+                sudo yum install -y webkit2gtk3-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel
             elif command -v pacman &> /dev/null; then
-                sudo pacman -S curl wget unzip
+                sudo pacman -S base-devel webkit2gtk gtk3 libappindicator-gtk3 librsvg
+            fi
+            ;;
+        "macos")
+            # Ensure Xcode Command Line Tools are installed
+            if ! xcode-select -p &> /dev/null; then
+                log_info "Installing Xcode Command Line Tools..."
+                xcode-select --install
+                log_warning "Please complete the Xcode Command Line Tools installation and re-run this script"
+                exit 1
             fi
             ;;
     esac
@@ -140,18 +217,9 @@ download_app() {
 install_from_source() {
     log_info "Installing from source..."
     
-    # Check prerequisites
-    if ! command -v node &> /dev/null; then
-        log_error "Node.js is required but not installed."
-        log_info "Please install Node.js from https://nodejs.org/"
-        exit 1
-    fi
-    
-    if ! command -v cargo &> /dev/null; then
-        log_error "Rust is required but not installed."
-        log_info "Please install Rust from https://rustup.rs/"
-        exit 1
-    fi
+    # Prerequisites should already be installed by install_dependencies
+    log_info "Using Node.js: $(node --version)"
+    log_info "Using Rust: $(rustc --version)"
     
     # Clone and build
     git clone "$REPO_URL" "$INSTALL_DIR/source"
@@ -312,6 +380,25 @@ EOL
 
 
 main() {
+    echo "🎙️ Meeting Recorder - Complete Setup"
+    echo "===================================="
+    echo "This installer will:"
+    echo "  ✅ Install Node.js and Rust (if needed)"
+    echo "  ✅ Download Meeting Recorder app" 
+    echo "  ✅ Download Whisper AI models (3+ GB)"
+    echo "  ✅ Set up all configuration files"
+    echo "  ✅ Create desktop shortcuts"
+    echo
+    echo "⏰ Estimated time: 5-15 minutes (depending on downloads)"
+    echo "💾 Disk space needed: ~5 GB"
+    echo
+    read -p "Continue with installation? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Installation cancelled by user"
+        exit 0
+    fi
+    
     log_info "Starting installation process..."
     
     # Detect platform
@@ -320,6 +407,7 @@ main() {
     
     if [ "$platform" = "unknown" ]; then
         log_error "Unsupported platform. Please install manually."
+        log_info "Supported platforms: macOS, Linux"
         exit 1
     fi
     
