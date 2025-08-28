@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { 
   Play, 
@@ -59,6 +59,8 @@ const MeetingsManager: React.FC = () => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [segments, setSegments] = useState<MeetingSegment[]>([]);
+  const [isLoadingMeetingDetails, setIsLoadingMeetingDetails] = useState(false);
+  const currentMeetingIdRef = useRef<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [newMeetingTitle, setNewMeetingTitle] = useState('');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -116,8 +118,7 @@ const MeetingsManager: React.FC = () => {
 
   useEffect(() => {
     if (selectedMeeting) {
-      loadMeetingSegments(selectedMeeting.id);
-      // Reset audio player state when meeting changes
+      // Reset audio player states but keep segments until new ones load
       setShowAudioPlayer(false);
       setAudioDataUrl(null);
       setCurrentTime(0);
@@ -125,8 +126,19 @@ const MeetingsManager: React.FC = () => {
       setIsPlaying(false);
       setIsSyncEnabled(false);
       setLastScrolledSegmentId(null);
+      
+      // Reset parsed metadata immediately to prevent showing old meeting's data
+      setParsedMetadata(null);
+      
+      // Load meeting segments (they will be cleared in the function if needed)
+      loadMeetingSegments(selectedMeeting.id);
+    } else {
+      // Clear everything if no meeting selected
+      setSegments([]);
+      setIsLoadingMeetingDetails(false);
+      setParsedMetadata(null);
     }
-  }, [selectedMeeting]);
+  }, [selectedMeeting?.id]); // Only depend on the ID to prevent unnecessary re-renders
 
   const loadMeetings = async () => {
     setIsLoading(true);
@@ -344,17 +356,39 @@ const MeetingsManager: React.FC = () => {
   };
 
 
-  const loadMeetingSegments = async (meetingId: string) => {
+  const loadMeetingSegments = useCallback(async (meetingId: string) => {
+    // Only set loading if this is a different meeting than currently displayed
+    const isDifferentMeeting = currentMeetingIdRef.current !== meetingId;
+    
+    if (isDifferentMeeting) {
+      setIsLoadingMeetingDetails(true);
+      // Clear segments only when switching to a different meeting
+      setSegments([]);
+    }
+    
+    currentMeetingIdRef.current = meetingId;
+    
     try {
       const meetingSegments = await invoke<MeetingSegment[]>('get_meeting_segments', {
         meetingId: meetingId
       });
-      setSegments(meetingSegments);
+      
+      // Only update if this is still the selected meeting (prevent race conditions)
+      if (currentMeetingIdRef.current === meetingId) {
+        setSegments(meetingSegments);
+      }
     } catch (error) {
       console.error('Failed to load meeting segments:', error);
-      setSegments([]);
+      if (currentMeetingIdRef.current === meetingId) {
+        setSegments([]);
+      }
+    } finally {
+      // Only clear loading if this is still the current meeting
+      if (currentMeetingIdRef.current === meetingId) {
+        setIsLoadingMeetingDetails(false);
+      }
     }
-  };
+  }, []);
 
   // Audio player functions
 
@@ -557,7 +591,7 @@ const MeetingsManager: React.FC = () => {
     } else {
       setParsedMetadata(null);
     }
-  }, [selectedMeeting?.meeting_minutes]);
+  }, [selectedMeeting?.id, selectedMeeting?.meeting_minutes]); // Include ID to ensure fresh parsing
 
   // Auto-scroll to current segment when sync is active
   const [lastScrolledSegmentId, setLastScrolledSegmentId] = useState<string | null>(null);
@@ -806,7 +840,12 @@ const MeetingsManager: React.FC = () => {
                     {filteredMeetings.map((meeting) => (
                       <div
                         key={meeting.id}
-                        onClick={() => setSelectedMeeting(meeting)}
+                        onClick={() => {
+                          // Only update if it's a different meeting
+                          if (selectedMeeting?.id !== meeting.id) {
+                            setSelectedMeeting(meeting);
+                          }
+                        }}
                         className={`group p-4 hover:bg-gray-50 cursor-pointer transition-all duration-200 ${
                           selectedMeeting?.id === meeting.id 
                             ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border-r-4 border-blue-500' 
@@ -919,7 +958,16 @@ const MeetingsManager: React.FC = () => {
               
               <div className="p-6">
                 {selectedMeeting ? (
-                  <div className="space-y-6">
+                  <div key={selectedMeeting.id} className="space-y-6">
+                    {/* Loading indicator for meeting details */}
+                    {isLoadingMeetingDetails && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                        <div className="flex items-center gap-3 text-blue-600">
+                          <Loader className="w-5 h-5 animate-spin" />
+                          <span className="font-medium">Loading meeting details...</span>
+                        </div>
+                      </div>
+                    )}
                     {/* Meeting Header */}
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
                       <div className="flex items-center justify-between mb-4">
@@ -1155,7 +1203,7 @@ const MeetingsManager: React.FC = () => {
                     {/* Tab Content */}
                     <div className="mt-4">
                       {activeTab === 'overview' && (
-                        <div className="space-y-4">
+                        <div key={`overview-${selectedMeeting.id}`} className="space-y-4">
                           {/* AI-Generated Summary */}
                           <div className="rounded-2xl p-4 text-black bg-white">
                             <div className="flex items-center justify-between mb-3">
@@ -1207,6 +1255,7 @@ const MeetingsManager: React.FC = () => {
                               <div className="space-y-3">
                                 <div className="text-gray-800 leading-normal prose prose-sm max-w-none prose-headings:text-gray-900 prose-h1:text-xl prose-h1:font-bold prose-h1:mb-4 prose-h1:mt-6 prose-h2:text-lg prose-h2:font-semibold prose-h2:mb-3 prose-h2:mt-5 prose-h3:text-base prose-h3:font-medium prose-h3:mb-2 prose-h3:mt-4 prose-p:text-gray-700 prose-p:mb-3 prose-li:text-gray-700 prose-strong:text-gray-900 prose-table:text-sm prose-ul:mb-4 prose-ol:mb-4">
                                   <ReactMarkdown
+                                    key={selectedMeeting.id + (selectedMeeting.meeting_minutes?.slice(0, 50) || '')}
                                     remarkPlugins={[remarkGfm]}
                                     components={{
                                       h1: ({ children }) => (

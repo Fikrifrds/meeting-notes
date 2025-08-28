@@ -65,7 +65,7 @@ done
 # Create configuration
 cat > "MeetingRecorder-Data/.env" << 'EOF'
 OPENAI_API_KEY=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
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4.1
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.3
 EOF

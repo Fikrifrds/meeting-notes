@@ -1489,21 +1489,10 @@ struct OpenAIChoice {
 }
 
 #[derive(Serialize, Deserialize)]
-struct TokenDetails {
-    cached_tokens: Option<u32>,
-    audio_tokens: Option<u32>,
-    reasoning_tokens: Option<u32>,
-    accepted_prediction_tokens: Option<u32>,
-    rejected_prediction_tokens: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize)]
 struct Usage {
     prompt_tokens: u32,
     completion_tokens: u32,
     total_tokens: u32,
-    prompt_tokens_details: Option<TokenDetails>,
-    completion_tokens_details: Option<TokenDetails>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1511,6 +1500,8 @@ struct OpenAIResponse {
     choices: Vec<OpenAIChoice>,
     usage: Option<Usage>,
 }
+
+
 
 #[tauri::command]
 async fn get_gain_settings(state: State<'_, AudioState>) -> Result<(f32, f32), String> {
@@ -1757,7 +1748,7 @@ async fn generate_meeting_minutes(transcript: String, language: Option<String>) 
     let api_key = std::env::var("OPENAI_API_KEY")
         .map_err(|_| "OPENAI_API_KEY not found in environment variables. Please add it to your .env file.".to_string())?;
     
-    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1".to_string());
     let max_tokens = std::env::var("OPENAI_MAX_TOKENS")
         .unwrap_or_else(|_| "2000".to_string())
         .parse::<u32>()

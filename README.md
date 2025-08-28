@@ -7,7 +7,7 @@ A modern desktop application for recording meetings with real-time transcription
 - 🎙️ **Audio Recording**: High-quality audio recording with visual feedback
 - 📝 **Real-time Transcription**: AI-powered transcription using Whisper
 - 🤖 **AI Meeting Minutes**: Generate meeting minutes with OpenAI
-- ☁️ **Cloud AI**: OpenAI integration for fast, reliable results
+- ☁️ **Cloud AI**: OpenAI integration for best quality results
 - ⏱️ **Timer Display**: Live recording timer with formatted time display
 - 🎨 **Modern UI**: Clean, responsive interface with audio visualization
 - 💾 **File Management**: Automatic saving of audio files and transcripts
@@ -102,19 +102,33 @@ This command will:
 
 ## AI Provider Configuration
 
-### ☁️ OpenAI (Cloud AI) - Fast and Reliable
+### ☁️ OpenAI (Cloud AI) - Best Quality
 
 **Advantages:**
-- ✅ Very fast processing
+- ✅ Best quality meeting minutes
+- ✅ Very fast processing  
 - ✅ High-quality results
 - ✅ No local setup required
 
 **Setup:**
-- Pre-configured with OpenAI API integration
-- Ready to use for AI meeting minutes generation
-- No additional configuration needed
+1. Get API key from https://platform.openai.com/api-keys
+2. Add your OPENAI_API_KEY to your .env file
+3. The app is pre-configured to use OpenAI
 
 **Privacy Notice**: Transcript text will be sent to OpenAI for processing.
+
+### 🏠 Ollama (Local AI) - Privacy Alternative
+
+**Advantages:**
+- ✅ Complete privacy - data never leaves your device
+- ✅ No API costs
+- ✅ Works offline
+
+**Setup:**
+1. Install Ollama: https://ollama.ai/
+2. Pull the model: `ollama pull gemma3:4b`  
+3. Start Ollama: `ollama serve`
+4. Comment out OPENAI_API_KEY and uncomment OLLAMA settings in .env
 
 ## Development Workflow
 
@@ -245,7 +259,6 @@ Optimized for Tauri development:
 **Key Dependencies:**
 - `tauri`: Desktop application framework
 - `whisper-rs`: Rust bindings for OpenAI Whisper
-- `ollama-rs`: Rust client for Ollama local AI
 - `reqwest`: HTTP client for OpenAI API
 - `cpal`: Cross-platform audio library
 - `hound`: WAV file reading/writing
