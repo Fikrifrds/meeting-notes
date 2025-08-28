@@ -1467,24 +1467,24 @@ async fn save_uploaded_audio(file_name: String, file_data: Vec<u8>) -> Result<St
     Ok(file_path.to_string_lossy().to_string())
 }
 
-// Together AI API structures
+// OpenAI API structures
 #[derive(Serialize, Deserialize)]
-struct TogetherMessage {
+struct OpenAIMessage {
     role: String,
     content: String,
 }
 
 #[derive(Serialize, Deserialize)]
-struct TogetherRequest {
+struct OpenAIRequest {
     model: String,
-    messages: Vec<TogetherMessage>,
+    messages: Vec<OpenAIMessage>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct TogetherChoice {
-    message: TogetherMessage,
+struct OpenAIChoice {
+    message: OpenAIMessage,
     finish_reason: Option<String>,
 }
 
@@ -1496,8 +1496,8 @@ struct Usage {
 }
 
 #[derive(Serialize, Deserialize)]
-struct TogetherResponse {
-    choices: Vec<TogetherChoice>,
+struct OpenAIResponse {
+    choices: Vec<OpenAIChoice>,
     usage: Option<Usage>,
 }
 
@@ -1745,15 +1745,15 @@ async fn generate_meeting_minutes(transcript: String, language: Option<String>) 
     // Load environment variables
     dotenv::dotenv().ok();
     
-    let api_key = std::env::var("TOGETHER_AI_API_KEY")
-        .map_err(|_| "TOGETHER_AI_API_KEY not found in environment variables. Please add it to your .env file.".to_string())?;
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY not found in environment variables. Please add it to your .env file.".to_string())?;
     
-    let model = std::env::var("TOGETHER_AI_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
-    let max_tokens = std::env::var("TOGETHER_AI_MAX_TOKENS")
+    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1".to_string());
+    let max_tokens = std::env::var("OPENAI_MAX_TOKENS")
         .unwrap_or_else(|_| "2000".to_string())
         .parse::<u32>()
         .unwrap_or(2000);
-    let temperature = std::env::var("TOGETHER_AI_TEMPERATURE")
+    let temperature = std::env::var("OPENAI_TEMPERATURE")
         .unwrap_or_else(|_| "0.3".to_string())
         .parse::<f32>()
         .unwrap_or(0.3);
@@ -1812,15 +1812,15 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
 
     let user_prompt = format!("Please generate meeting minutes from this transcript:\n\n{}", transcript);
 
-    // Prepare the Together AI request
-    let request = TogetherRequest {
+    // Prepare the OpenAI request
+    let request = OpenAIRequest {
         model,
         messages: vec![
-            TogetherMessage {
+            OpenAIMessage {
                 role: "system".to_string(),
                 content: system_prompt.to_string(),
             },
-            TogetherMessage {
+            OpenAIMessage {
                 role: "user".to_string(),
                 content: user_prompt,
             },
@@ -1832,18 +1832,18 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
     // Make the API call
     let client = reqwest::Client::new();
     let response = client
-        .post("https://api.together.xyz/v1/chat/completions")
+        .post("https://api.openai.com/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&request)
         .send()
         .await
-        .map_err(|e| format!("Failed to send request to Together AI: {}", e))?;
+        .map_err(|e| format!("Failed to send request to OpenAI: {}", e))?;
 
     if !response.status().is_success() {
         let status_code = response.status();
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Together AI API error ({}): {}", status_code, error_text));
+        return Err(format!("OpenAI API error ({}): {}", status_code, error_text));
     }
 
     // Get response text first for debugging
@@ -1851,14 +1851,14 @@ ENERGY: [High/Medium/Low]"#, language_instruction);
         .map_err(|e| format!("Failed to get response text: {}", e))?;
     
     // Try to parse the JSON response
-    let together_response: TogetherResponse = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse Together AI response: {}. Response was: {}", e, response_text))?;
+    let openai_response: OpenAIResponse = serde_json::from_str(&response_text)
+        .map_err(|e| format!("Failed to parse OpenAI response: {}. Response was: {}", e, response_text))?;
 
-    if together_response.choices.is_empty() {
-        return Err("No response from Together AI".to_string());
+    if openai_response.choices.is_empty() {
+        return Err("No response from OpenAI".to_string());
     }
 
-    let meeting_minutes = &together_response.choices[0].message.content;
+    let meeting_minutes = &openai_response.choices[0].message.content;
     
     Ok(meeting_minutes.to_string())
 }

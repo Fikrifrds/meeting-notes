@@ -642,11 +642,11 @@ const MeetingsManager: React.FC = () => {
       await invoke('save_meeting_minutes_to_database', {
         meetingId: selectedMeeting.id,
         meetingMinutes: result,
-        aiProvider: 'together_ai'
+        aiProvider: 'openai'
       });
       
       // Update the selected meeting with new minutes
-      const updatedMeeting = { ...selectedMeeting, meeting_minutes: result, ai_provider: 'together_ai' };
+      const updatedMeeting = { ...selectedMeeting, meeting_minutes: result, ai_provider: 'openai' };
       setSelectedMeeting(updatedMeeting);
       
       // Update the meetings list
@@ -654,14 +654,14 @@ const MeetingsManager: React.FC = () => {
         m.id === selectedMeeting.id ? updatedMeeting : m
       ));
       
-      setError(`✅ Meeting minutes generated successfully with Together AI!`);
+      setError(`✅ Meeting minutes generated successfully with OpenAI!`);
       
       // Auto-hide success message after 3 seconds
       setTimeout(() => setError(null), 3000);
       
     } catch (error) {
       console.error('Failed to generate meeting minutes:', error);
-      setError(`Failed to generate meeting minutes with Together AI: ${error}`);
+      setError(`Failed to generate meeting minutes with OpenAI: ${error}`);
     } finally {
       setIsGeneratingMinutes(false);
     }
@@ -1216,7 +1216,7 @@ const MeetingsManager: React.FC = () => {
                               {/* Generate/Regenerate Button */}
                               <div className="flex items-center gap-3">
                                 <div className="text-sm text-gray-600">
-                                  Meeting minutes generated with Together AI
+                                  Meeting minutes generated with OpenAI
                                 </div>
                                 
                                 <button

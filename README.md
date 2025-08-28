@@ -6,8 +6,8 @@ A modern desktop application for recording meetings with real-time transcription
 
 - 🎙️ **Audio Recording**: High-quality audio recording with visual feedback
 - 📝 **Real-time Transcription**: AI-powered transcription using Whisper
-- 🤖 **AI Meeting Minutes**: Generate meeting minutes with Together AI
-- ☁️ **Cloud AI**: Together AI integration for best quality results
+- 🤖 **AI Meeting Minutes**: Generate meeting minutes with OpenAI
+- ☁️ **Cloud AI**: OpenAI integration for best quality results
 - ⏱️ **Timer Display**: Live recording timer with formatted time display
 - 🎨 **Modern UI**: Clean, responsive interface with audio visualization
 - 💾 **File Management**: Automatic saving of audio files and transcripts
@@ -102,21 +102,20 @@ This command will:
 
 ## AI Provider Configuration
 
-### ☁️ Together AI (Cloud AI) - Best Quality
+### ☁️ OpenAI (Cloud AI) - Best Quality
 
 **Advantages:**
 - ✅ Best quality meeting minutes
 - ✅ Very fast processing  
 - ✅ High-quality results
-- ✅ Cost-effective with multiple model options
 - ✅ No local setup required
 
 **Setup:**
-1. Get API key from https://api.together.xyz
-2. Add your TOGETHER_AI_API_KEY to your .env file
-3. The app is pre-configured to use Together AI
+1. Get API key from https://platform.openai.com/api-keys
+2. Add your OPENAI_API_KEY to your .env file
+3. The app is pre-configured to use OpenAI
 
-**Privacy Notice**: Transcript text will be sent to Together AI for processing.
+**Privacy Notice**: Transcript text will be sent to OpenAI for processing.
 
 ### 🏠 Ollama (Local AI) - Privacy Alternative
 
@@ -129,7 +128,7 @@ This command will:
 1. Install Ollama: https://ollama.ai/
 2. Pull the model: `ollama pull gemma3:4b`  
 3. Start Ollama: `ollama serve`
-4. Comment out TOGETHER_AI_API_KEY and uncomment OLLAMA settings in .env
+4. Comment out OPENAI_API_KEY and uncomment OLLAMA settings in .env
 
 ## Development Workflow
 
@@ -260,7 +259,7 @@ Optimized for Tauri development:
 **Key Dependencies:**
 - `tauri`: Desktop application framework
 - `whisper-rs`: Rust bindings for OpenAI Whisper
-- `reqwest`: HTTP client for Together AI API
+- `reqwest`: HTTP client for OpenAI API
 - `cpal`: Cross-platform audio library
 - `hound`: WAV file reading/writing
 - `tokio`: Async runtime
@@ -413,7 +412,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [x] Real-time transcription during recording
 - [x] Modern React UI with TypeScript
 - [x] Cross-platform desktop application
-- [x] AI meeting minutes generation (Together AI + Ollama)
+- [x] AI meeting minutes generation (OpenAI + Ollama)
 - [x] Local AI support with Ollama integration
 - [x] Privacy-focused offline AI processing
 - [ ] Multiple language support for transcription

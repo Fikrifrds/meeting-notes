@@ -290,12 +290,12 @@ setup_environment() {
     if [ ! -f "$env_file" ]; then
         cat > "$env_file" << 'EOL'
 # AI Configuration
-TOGETHER_AI_API_KEY=your-api-key-here
+OPENAI_API_KEY=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
 
-# Together AI Settings
-TOGETHER_AI_MODEL=openai/gpt-4o-mini
-TOGETHER_AI_MAX_TOKENS=2000
-TOGETHER_AI_TEMPERATURE=0.3
+# OpenAI Settings
+OPENAI_MODEL=gpt-4.1
+OPENAI_MAX_TOKENS=2000
+OPENAI_TEMPERATURE=0.3
 
 # Whisper Configuration
 WHISPER_MODEL_PATH=auto
@@ -459,7 +459,7 @@ main() {
     echo "📚 Features ready to use:"
     echo "   ✅ Audio recording"
     echo "   ✅ AI transcription (Whisper model downloaded)"
-    echo "   ✅ AI meeting minutes generation (Together AI)"
+    echo "   ✅ AI meeting minutes generation (OpenAI)"
     echo "   ✅ Cloud AI processing ready"
     echo
     echo "🔄 To update: $INSTALL_DIR/update.sh"

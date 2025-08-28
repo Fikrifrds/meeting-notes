@@ -637,7 +637,7 @@ function App() {
     try {
       clearError();
       setIsGeneratingMinutes(true);
-      setMeetingMinutes(`Generating meeting minutes with Together AI...`);
+      setMeetingMinutes(`Generating meeting minutes with OpenAI...`);
       
       const languageParam = selectedLanguage === 'auto' ? null : selectedLanguage;
       const result = await invoke<string>('generate_meeting_minutes', { 
@@ -654,7 +654,7 @@ function App() {
     } catch (error) {
       console.error("Failed to generate meeting minutes:", error);
       setMeetingMinutes("");
-      showError(`Failed to generate meeting minutes with Together AI: ${error}`);
+      showError(`Failed to generate meeting minutes with OpenAI: ${error}`);
     } finally {
       setIsGeneratingMinutes(false);
     }
@@ -671,7 +671,7 @@ function App() {
       await invoke("save_meeting_minutes_to_database", {
         meetingId: currentMeetingId,
         meetingMinutes: minutes,
-        aiProvider: 'together_ai'
+        aiProvider: 'openai'
       });
       
       console.log("Meeting minutes auto-saved to database");
@@ -792,7 +792,7 @@ function App() {
 
                 {/* AI Provider Info */}
                 <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                  Using Together AI for meeting minutes generation
+                  Using OpenAI for meeting minutes generation
                 </div>
               </div>
 
