@@ -23,7 +23,9 @@ import {
   Upload,
   Sliders,
   Target,
-  Info
+  Info,
+  Mic2Icon,
+  MicIcon
 } from 'lucide-react';
 import "./App.css";
 
@@ -854,43 +856,31 @@ function App() {
 
       {/* Message Banner */}
       {error && (
-        <div className={`border-l-4 p-4 mx-4 mt-4 rounded-r-lg ${
-          error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
-            ? 'bg-green-50 border-green-400' 
-            : 'bg-red-50 border-red-400'
+        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-[9999] max-w-2xl w-full mx-4 p-4 rounded-xl border backdrop-blur-sm shadow-lg animate-in slide-in-from-top-2 fade-in duration-300 ${
+          error.startsWith('SUCCESS') || error.startsWith('AUDIO') || error.startsWith('✅')
+            ? 'bg-green-50 border-green-200 text-green-700' 
+            : 'bg-red-50 border-red-200 text-red-700'
         }`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                {error.startsWith('SUCCESS') || error.startsWith('AUDIO') ? (
-                  <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                ) : (
-                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                )}
-              </div>
-              <div className="ml-3">
-                <p className={`text-sm ${
-                  error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
-                    ? 'text-green-700' 
-                    : 'text-red-700'
-                }`}>{error}</p>
-              </div>
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0">
+              {error.startsWith('SUCCESS') || error.startsWith('AUDIO') || error.startsWith('✅') ? (
+                <svg className="h-5 w-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium break-words">{error}</p>
             </div>
             <button 
               onClick={clearError}
-              className={`transition-colors ${
-                error.startsWith('SUCCESS') || error.startsWith('AUDIO') 
-                  ? 'text-green-400 hover:text-green-600' 
-                  : 'text-red-400 hover:text-red-600'
-              }`}
+              className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
             >
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -1450,7 +1440,7 @@ function App() {
                       className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
                       onClick={testMicrophoneAccess}
                     >
-                      <TestTube className="w-4 h-4 mr-2" />
+                      <MicIcon className="w-4 h-4 mr-2" />
                       Test Microphone
                     </button>
                     

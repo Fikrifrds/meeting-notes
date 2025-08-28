@@ -682,23 +682,23 @@ const MeetingsManager: React.FC = () => {
         </div>
 
         {error && (
-          <div className={`mb-6 p-4 rounded-xl border backdrop-blur-sm ${
+          <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 max-w-2xl w-full mx-4 p-4 rounded-xl border backdrop-blur-sm shadow-lg animate-in slide-in-from-top-2 fade-in duration-300 ${
             error.startsWith('✅') 
               ? 'bg-green-50 border-green-200 text-green-700' 
               : 'bg-red-50 border-red-200 text-red-700'
           }`}>
             <div className="flex items-start gap-3">
               {error.startsWith('✅') ? (
-                <CheckCircle className="w-5 h-5 mt-0.5 text-green-500" />
+                <CheckCircle className="w-5 h-5 mt-0.5 text-green-500 flex-shrink-0" />
               ) : (
-                <AlertCircle className="w-5 h-5 mt-0.5 text-red-500" />
+                <AlertCircle className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
               )}
-              <div className="flex-1">
-                <p className="font-medium">{error}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium break-words">{error}</p>
               </div>
               <button
                 onClick={() => setError(null)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
