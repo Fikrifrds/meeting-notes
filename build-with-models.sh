@@ -177,10 +177,10 @@ if [ -d "$APP_NAME" ]; then
     # Create environment file
     if [ ! -f "$DATA_DIR/.env" ]; then
         cat > "$DATA_DIR/.env" << 'ENV_EOF'
-OPENAI_API_KEY=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
-OPENAI_MODEL=gpt-4.1
-OPENAI_MAX_TOKENS=2000
-OPENAI_TEMPERATURE=0.3
+TOGETHER_AI_API_KEY=your-api-key-here
+TOGETHER_AI_MODEL=openai/gpt-4o-mini
+TOGETHER_AI_MAX_TOKENS=2000
+TOGETHER_AI_TEMPERATURE=0.3
 ENV_EOF
         echo "⚙️ Environment configuration created"
     fi
@@ -338,7 +338,7 @@ Features Ready to Use:
 🤖 AI transcription (Whisper models included)
 📝 Meeting minutes generation
 🏠 Local AI support (with Ollama)
-☁️ Cloud AI support (add OpenAI API key)
+☁️ Cloud AI support (add Together AI API key)
 
 Data Location:
 --------------
