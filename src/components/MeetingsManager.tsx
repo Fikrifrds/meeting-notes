@@ -747,7 +747,7 @@ const MeetingsManager: React.FC = () => {
               </div>
 
               {/* Date Filter */}
-              <div className="mb-4">
+              <div className="mb-4 p-4">
                 <div className="flex flex-col space-y-3">
                   <div className="flex items-center gap-2 mb-2">
                     <CalendarDays className="h-4 w-4 text-gray-500" />
