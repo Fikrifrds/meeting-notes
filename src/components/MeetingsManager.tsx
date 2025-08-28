@@ -26,7 +26,7 @@ import {
   AlertCircle,
   Loader,
   Lightbulb,
-  Music
+  Music,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -109,6 +109,7 @@ const MeetingsManager: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
+
 
   useEffect(() => {
     loadMeetings();
@@ -672,11 +673,9 @@ const MeetingsManager: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="text-right">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-white bg-opacity-60 backdrop-blur-sm rounded-xl border border-gray-200 shadow-sm">
-                <Briefcase className="w-4 h-4 text-gray-500" />
-                <span className="text-sm text-gray-600 font-mono">~/Documents/MeetingRecorder</span>
-              </div>
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-white bg-opacity-60 backdrop-blur-sm rounded-xl border border-gray-200 shadow-sm">
+              <Briefcase className="w-4 h-4 text-gray-500" />
+              <span className="text-sm text-gray-600 font-mono">~/Documents/MeetingRecorder</span>
             </div>
           </div>
         </div>
@@ -1842,6 +1841,7 @@ const MeetingsManager: React.FC = () => {
           </div>
         )}
         
+
         {/* Hidden Audio Element */}
         {audioDataUrl && (
           <audio

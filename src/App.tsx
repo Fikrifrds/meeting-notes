@@ -796,14 +796,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Settings Button */}
-              <button 
-                className="text-gray-600 hover:text-gray-900 p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                onClick={toggleSettings}
-                title="Settings"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
             </div>
           </div>
           
@@ -987,6 +979,16 @@ function App() {
                           <Zap className="w-4 h-4 mr-2" />
                         )}
                         {isRealtimeEnabled ? 'Real-time ON' : 'Enable Real-time'}
+                      </button>
+
+                      {/* Settings Button */}
+                      <button 
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-lg flex items-center"
+                        onClick={toggleSettings}
+                        title="Audio & Recording Settings"
+                      >
+                        <Settings className="w-4 h-4 mr-2" />
+                        Settings
                       </button>
 
                       {lastRecordingPath && !transcript && (
